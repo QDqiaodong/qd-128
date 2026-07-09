@@ -1,0 +1,17 @@
+.git/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+.env
+.env.local
+
+target/
+.mvn/
+mvnw
+mvnw.cmd
+
+*.log
+*.tmp
