@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { Box as Package, HomeFilled as Home, Refresh, ArrowUp } from '@element-plus/icons-vue'
-import { lockerApi, buildingApi } from '@/api/locker'
-import type { LockerDTO, BuildingTreeDTO } from '@/api/locker'
+import { lockerApi, buildingApi, STATUS_NAME_MAP } from '@/api/locker'
+import type { LockerDTO, BuildingTreeDTO, LockerStatusCode } from '@/api/locker'
+
+const activeCount = ref(0)
 
 const lockerCount = ref(0)
 const buildingCount = ref(0)
@@ -16,15 +18,17 @@ onMounted(async () => {
 
 const fetchData = async () => {
   try {
-    const [countRes, treeRes, recentRes] = await Promise.all([
+    const [countRes, treeRes, recentRes, activeRes] = await Promise.all([
       lockerApi.countLockers(),
       buildingApi.getBuildingTree(),
-      lockerApi.getLockers(1, 5)
+      lockerApi.getLockers(1, 5),
+      lockerApi.getLockers(1, 1, ['ACTIVE'])
     ])
     lockerCount.value = countRes.data
     buildingTree.value = treeRes.data
     buildingCount.value = treeRes.data.length
     recentLockers.value = recentRes.data.data
+    activeCount.value = Number(activeRes.data.total || 0)
 
     buildingStats.value = await Promise.all(
       buildingTree.value.map(async (b) => ({
@@ -84,7 +88,7 @@ const fetchData = async () => {
               <ArrowUp />
             </div>
             <div class="stat-info">
-              <el-statistic title="运营状态" :value="'正常'" />
+              <el-statistic title="正常运营柜体" :value="activeCount" suffix="台" />
             </div>
           </div>
         </el-card>
@@ -131,6 +135,22 @@ const fetchData = async () => {
             <el-table-column prop="compartmentCount" label="格口">
               <template #default="{ row }">
                 {{ row.compartmentCount }}格
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">
+                <el-tag
+                  :type="
+                    row.status === 'ACTIVE'
+                      ? 'success'
+                      : row.status === 'TEMPORARILY_DISABLED'
+                        ? 'warning'
+                        : 'info'
+                  "
+                  size="small"
+                >
+                  {{ STATUS_NAME_MAP[row.status as LockerStatusCode] || '-' }}
+                </el-tag>
               </template>
             </el-table-column>
           </el-table>

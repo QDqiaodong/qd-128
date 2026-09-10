@@ -16,13 +16,22 @@ export interface LockerDTO {
   unitId: number
   unitName: string
   floor: string
-  installLocation: string
   installationDate: string
-  status: string
+  status: LockerStatusCode
+  statusName: string
+  /** 归档快照时刻的状态（可能与当前 status 不同） */
+  snapshotStatus?: LockerStatusCode
+  snapshotStatusName?: string
+  fromSnapshot?: boolean
+  /** 归档详情中冗余的当前实时状态 */
+  currentStatus?: LockerStatusCode
+  currentStatusName?: string
   remark: string
-  createdAt: string
-  updatedAt: string
+  createTime: string
+  updateTime: string
 }
+
+export type LockerStatusCode = 'ACTIVE' | 'TEMPORARILY_DISABLED' | 'PERMANENTLY_DISABLED'
 
 export interface PageResponse<T> {
   data: T[]
@@ -35,6 +44,8 @@ export interface FilterRequest {
   buildingIds?: number[]
   unitIds?: number[]
   specTypes?: string[]
+  /** 生命周期状态过滤；不传时多条件筛选默认只返回正常柜体 */
+  statuses?: LockerStatusCode[]
   startDate?: string
   endDate?: string
   page?: number
@@ -83,7 +94,25 @@ export interface AdjustmentRecord {
   newUnitName: string
   reason: string
   operator: string
-  createdAt: string
+  adjustTime: string
+}
+
+export interface StatusChangeRequest {
+  targetStatus: LockerStatusCode
+  reason: string
+  operator?: string
+}
+
+export interface StatusChangeRecord {
+  id: number
+  lockerId: number
+  oldStatus: LockerStatusCode
+  newStatus: LockerStatusCode
+  oldStatusName?: string
+  newStatusName?: string
+  reason: string
+  operator: string
+  changeTime: string
 }
 
 export interface BuildingTreeDTO {
@@ -102,16 +131,39 @@ export interface UnitDTO {
 
 export interface Archive {
   id: number
-  name: string
-  filterParams: string
-  lockerCount: number
-  createdBy: string
-  createdAt: string
+  archiveName: string
+  filterConditions: string
+  resultCount: number
+  operator: string
+  createTime: string
+}
+
+/** 状态码 -> 中文名称（与后端 LockerStatus 保持一致） */
+export const STATUS_NAME_MAP: Record<LockerStatusCode, string> = {
+  ACTIVE: '正常',
+  TEMPORARILY_DISABLED: '临时停用',
+  PERMANENTLY_DISABLED: '永久停用'
 }
 
 export const lockerApi = {
-  getLockers(page: number = 1, size: number = 20, keyword?: string) {
-    return api.get<PageResponse<LockerDTO>>('/lockers', { params: { page, size, keyword } })
+  getLockers(page: number = 1, size: number = 20, statuses?: LockerStatusCode[]) {
+    return api.get<PageResponse<LockerDTO>>('/lockers', {
+      params: { page, size, statuses: statuses && statuses.length ? statuses.join(',') : undefined },
+      paramsSerializer: {
+        serialize: (p: Record<string, unknown>) => {
+          const sp = new URLSearchParams()
+          Object.entries(p).forEach(([k, v]) => {
+            if (v === undefined || v === null || v === '') return
+            if (k === 'statuses' && typeof v === 'string') {
+              v.split(',').forEach((s) => sp.append(k, s))
+            } else {
+              sp.append(k, String(v))
+            }
+          })
+          return sp.toString()
+        }
+      }
+    })
   },
 
   getLockerById(id: number) {
@@ -142,8 +194,22 @@ export const lockerApi = {
     return api.get<AdjustmentRecord[]>(`/lockers/${id}/adjustments`)
   },
 
+  changeLockerStatus(id: number, data: StatusChangeRequest) {
+    return api.post<StatusChangeRecord>(`/lockers/${id}/status`, data)
+  },
+
+  getStatusChangeRecords(id: number, status?: LockerStatusCode) {
+    return api.get<StatusChangeRecord[]>(`/lockers/${id}/status-changes`, {
+      params: { status }
+    })
+  },
+
   getSpecTypes() {
     return api.get<Record<string, string>>('/lockers/spec-types')
+  },
+
+  getStatuses() {
+    return api.get<Record<LockerStatusCode, string>>('/lockers/statuses')
   },
 
   countLockers() {
@@ -190,16 +256,26 @@ export const buildingApi = {
 }
 
 export const archiveApi = {
-  createArchive(data: { name: string; filterParams: string; lockerCount: number; createdBy: string; lockerIds: number[] }) {
+  createArchive(data: {
+    archiveName: string
+    filterConditions?: string
+    resultCount: number
+    operator?: string
+    lockerIds: number[]
+  }) {
     return api.post<Archive>('/archives', data)
   },
 
-  createArchiveFromFilter(data: { filterRequest: FilterRequest; name: string; createdBy: string }) {
+  createArchiveFromFilter(data: {
+    filterRequest: FilterRequest
+    archiveName: string
+    operator?: string
+  }) {
     return api.post<Archive>('/archives/from-filter', data)
   },
 
   getArchives() {
-    return api.get<Archive[]>('/archives')
+    return api.get<PageResponse<Archive>>('/archives')
   },
 
   getArchiveById(id: number) {

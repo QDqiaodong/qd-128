@@ -2,6 +2,7 @@ package com.example.locker.controller;
 
 import com.example.locker.dto.*;
 import com.example.locker.entity.AdjustmentRecord;
+import com.example.locker.entity.StatusChangeRecord;
 import com.example.locker.service.LockerService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -21,8 +22,9 @@ public class LockerController {
     @GetMapping
     public ResponseEntity<PageResponse<LockerDTO>> getLockers(
             @RequestParam(defaultValue = "1") Integer page,
-            @RequestParam(defaultValue = "20") Integer size) {
-        return ResponseEntity.ok(lockerService.getLockers(page, size));
+            @RequestParam(defaultValue = "20") Integer size,
+            @RequestParam(required = false) List<String> statuses) {
+        return ResponseEntity.ok(lockerService.getLockers(page, size, statuses));
     }
 
     @GetMapping("/{id}")
@@ -61,9 +63,28 @@ public class LockerController {
         return ResponseEntity.ok(lockerService.getAdjustmentRecords(id));
     }
 
+    @PostMapping("/{id}/status")
+    public ResponseEntity<StatusChangeRecord> changeLockerStatus(
+            @PathVariable Long id,
+            @RequestBody StatusChangeRequest request) {
+        return ResponseEntity.ok(lockerService.changeLockerStatus(id, request));
+    }
+
+    @GetMapping("/{id}/status-changes")
+    public ResponseEntity<List<StatusChangeRecord>> getStatusChangeRecords(
+            @PathVariable Long id,
+            @RequestParam(required = false) String status) {
+        return ResponseEntity.ok(lockerService.getStatusChangeRecords(id, status));
+    }
+
     @GetMapping("/spec-types")
     public ResponseEntity<Map<String, String>> getSpecTypes() {
         return ResponseEntity.ok(lockerService.getSpecTypeMap());
+    }
+
+    @GetMapping("/statuses")
+    public ResponseEntity<Map<String, String>> getStatuses() {
+        return ResponseEntity.ok(lockerService.getStatusMap());
     }
 
     @GetMapping("/count")

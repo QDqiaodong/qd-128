@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS locker (
     unit_id BIGINT NOT NULL COMMENT '所属单元',
     floor VARCHAR(20) COMMENT '楼层',
     installation_date DATE COMMENT '安装日期',
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' COMMENT '生命周期状态: ACTIVE-正常, TEMPORARILY_DISABLED-临时停用, PERMANENTLY_DISABLED-永久停用',
     remark TEXT COMMENT '备注',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -49,6 +50,18 @@ CREATE TABLE IF NOT EXISTS adjustment_record (
     FOREIGN KEY (locker_id) REFERENCES locker(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='归属调整记录表';
 
+CREATE TABLE IF NOT EXISTS status_change_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    old_status VARCHAR(20) NOT NULL COMMENT '变更前状态',
+    new_status VARCHAR(20) NOT NULL COMMENT '变更后状态',
+    reason TEXT COMMENT '变更原因',
+    operator VARCHAR(50) COMMENT '操作人',
+    change_time DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '变更时间',
+    INDEX idx_locker_id (locker_id),
+    FOREIGN KEY (locker_id) REFERENCES locker(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='柜体生命周期状态变更记录表';
+
 CREATE TABLE IF NOT EXISTS archive (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     archive_name VARCHAR(200) NOT NULL COMMENT '归档名称',
@@ -62,17 +75,18 @@ CREATE TABLE IF NOT EXISTS archive_item (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     archive_id BIGINT NOT NULL COMMENT '归档ID',
     locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    status_snapshot VARCHAR(20) COMMENT '归档时柜体生命周期状态快照',
     create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (archive_id) REFERENCES archive(id) ON DELETE CASCADE,
     FOREIGN KEY (locker_id) REFERENCES locker(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='归档明细表';
 
-INSERT INTO building (name, code, sort_order) VALUES 
+INSERT INTO building (name, code, sort_order) VALUES
 ('1号楼', 'B001', 1),
 ('2号楼', 'B002', 2),
 ('3号楼', 'B003', 3);
 
-INSERT INTO unit (building_id, name, code, sort_order) VALUES 
+INSERT INTO unit (building_id, name, code, sort_order) VALUES
 (1, '1单元', 'U001', 1),
 (1, '2单元', 'U002', 2),
 (2, '1单元', 'U003', 1),

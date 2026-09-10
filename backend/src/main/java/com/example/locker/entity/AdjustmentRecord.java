@@ -42,6 +42,18 @@ public class AdjustmentRecord {
     @Column(name = "adjust_time")
     private LocalDateTime adjustTime;
 
+    @Transient
+    private String oldBuildingName;
+
+    @Transient
+    private String oldUnitName;
+
+    @Transient
+    private String newBuildingName;
+
+    @Transient
+    private String newUnitName;
+
     @PrePersist
     protected void onCreate() {
         adjustTime = LocalDateTime.now();

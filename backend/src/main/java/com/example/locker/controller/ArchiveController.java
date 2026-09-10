@@ -66,6 +66,11 @@ public class ArchiveController {
             List<String> specTypes = (List<String>) filterMap.get("specTypes");
             filterRequest.setSpecTypes(specTypes);
         }
+        if (filterMap.containsKey("statuses")) {
+            @SuppressWarnings("unchecked")
+            List<String> statuses = (List<String>) filterMap.get("statuses");
+            filterRequest.setStatuses(statuses);
+        }
         if (filterMap.containsKey("startDate")) {
             filterRequest.setStartDate((String) filterMap.get("startDate"));
         }

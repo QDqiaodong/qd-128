@@ -5,6 +5,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.AllArgsConstructor;
 
+import com.example.locker.enums.LockerStatus;
+
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 
@@ -39,6 +41,10 @@ public class Locker {
 
     @Column(name = "installation_date")
     private LocalDate installationDate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false, length = 20)
+    private LockerStatus status = LockerStatus.ACTIVE;
 
     @Column(name = "remark", columnDefinition = "TEXT")
     private String remark;

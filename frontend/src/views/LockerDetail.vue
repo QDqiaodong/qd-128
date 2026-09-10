@@ -1,23 +1,114 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { lockerApi, buildingApi } from '@/api/locker'
-import { ElMessage } from 'element-plus'
-import type { LockerDTO, AdjustmentRecord, BuildingTreeDTO, UnitDTO, AdjustRequest } from '@/api/locker'
+import { lockerApi, buildingApi, STATUS_NAME_MAP } from '@/api/locker'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import type {
+  LockerDTO,
+  AdjustmentRecord,
+  StatusChangeRecord,
+  BuildingTreeDTO,
+  UnitDTO,
+  AdjustRequest,
+  LockerStatusCode,
+  StatusChangeRequest
+} from '@/api/locker'
 
 const router = useRouter()
 const route = useRoute()
 const lockerId = ref(Number(route.params.id))
 const locker = ref<LockerDTO | null>(null)
 const adjustmentRecords = ref<AdjustmentRecord[]>([])
+const statusRecords = ref<StatusChangeRecord[]>([])
 const buildingTree = ref<BuildingTreeDTO[]>([])
 const units = ref<UnitDTO[]>([])
+
 const showAdjustDialog = ref(false)
 const adjustForm = ref<AdjustRequest>({
   newBuildingId: 0,
   newUnitId: 0,
-  reason: ''
+  reason: '',
+  operator: ''
 })
+
+// ---------------- 状态 ----------------
+
+const statusTagType = (status?: string) => {
+  if (status === 'ACTIVE') return 'success'
+  if (status === 'TEMPORARILY_DISABLED') return 'warning'
+  if (status === 'PERMANENTLY_DISABLED') return 'info'
+  return 'info'
+}
+
+const statusLabel = (status?: string) =>
+  STATUS_NAME_MAP[status as LockerStatusCode] || '-'
+
+const statusFilter = ref<LockerStatusCode | ''>('')
+const statusFilterOptions = Object.entries(STATUS_NAME_MAP).map(([value, label]) => ({
+  value: value as LockerStatusCode,
+  label
+}))
+
+const filteredStatusRecords = computed(() => {
+  if (!statusFilter.value) return statusRecords.value
+  return statusRecords.value.filter((r) => r.newStatus === statusFilter.value)
+})
+
+const statusDialogVisible = ref(false)
+const statusAction = ref<'TEMPORARILY_DISABLED' | 'PERMANENTLY_DISABLED' | 'ACTIVE'>(
+  'TEMPORARILY_DISABLED'
+)
+const statusForm = ref<StatusChangeRequest>({
+  targetStatus: 'TEMPORARILY_DISABLED',
+  reason: '',
+  operator: ''
+})
+
+const statusDialogTitle = computed(() => {
+  if (statusAction.value === 'ACTIVE') return '恢复柜体'
+  if (statusAction.value === 'TEMPORARILY_DISABLED') return '临时停用'
+  return '永久停用'
+})
+
+const openStatusDialog = (
+  action: 'TEMPORARILY_DISABLED' | 'PERMANENTLY_DISABLED' | 'ACTIVE'
+) => {
+  statusAction.value = action
+  statusForm.value = { targetStatus: action, reason: '', operator: '' }
+  statusDialogVisible.value = true
+}
+
+const confirmStatusChange = async () => {
+  if (!statusForm.value.reason.trim()) {
+    ElMessage.warning('请填写变更原因')
+    return
+  }
+  if (statusAction.value === 'PERMANENTLY_DISABLED') {
+    try {
+      await ElMessageBox.confirm(
+        '永久停用后该柜体将无法再恢复，确认继续？',
+        '永久停用确认',
+        { type: 'warning', confirmButtonText: '确认永久停用' }
+      )
+    } catch {
+      return
+    }
+  }
+  try {
+    await lockerApi.changeLockerStatus(lockerId.value, {
+      targetStatus: statusForm.value.targetStatus,
+      reason: statusForm.value.reason.trim(),
+      operator: statusForm.value.operator?.trim() || undefined
+    })
+    ElMessage.success('状态变更成功')
+    statusDialogVisible.value = false
+    await fetchData()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '状态变更失败')
+  }
+}
+
+// ---------------- 数据加载 ----------------
 
 onMounted(async () => {
   await fetchData()
@@ -25,18 +116,22 @@ onMounted(async () => {
 
 const fetchData = async () => {
   try {
-    const [lockerRes, recordsRes, treeRes] = await Promise.all([
+    const [lockerRes, recordsRes, statusRes, treeRes] = await Promise.all([
       lockerApi.getLockerById(lockerId.value),
       lockerApi.getAdjustmentRecords(lockerId.value),
+      lockerApi.getStatusChangeRecords(lockerId.value),
       buildingApi.getBuildingTree()
     ])
     locker.value = lockerRes.data
     adjustmentRecords.value = recordsRes.data
+    statusRecords.value = statusRes.data
     buildingTree.value = treeRes.data
   } catch (error) {
     console.error('获取数据失败', error)
   }
 }
+
+// ---------------- 归属调整 ----------------
 
 const handleBuildingChange = async (buildingId: number) => {
   try {
@@ -53,19 +148,29 @@ const handleAdjust = async () => {
     ElMessage.warning('请选择新的楼栋和单元')
     return
   }
+  if (!adjustForm.value.reason.trim()) {
+    ElMessage.warning('请填写调整原因')
+    return
+  }
   try {
-    await lockerApi.adjustLocker(lockerId.value, adjustForm.value)
+    await lockerApi.adjustLocker(lockerId.value, {
+      ...adjustForm.value,
+      reason: adjustForm.value.reason.trim(),
+      operator: adjustForm.value.operator?.trim() || undefined
+    })
     ElMessage.success('调整成功')
     showAdjustDialog.value = false
     await fetchData()
-  } catch (error) {
-    ElMessage.error('调整失败')
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '调整失败')
   }
 }
 
 const handleBack = () => {
   router.push('/lockers')
 }
+
+const formatTime = (t?: string) => t || '-'
 </script>
 
 <template>
@@ -81,7 +186,7 @@ const handleBack = () => {
           <el-tag type="primary">{{ locker.lockerNo }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="规格类型">
-          <el-tag>{{ locker.specType }}</el-tag>
+          <el-tag>{{ locker.specTypeName || locker.specType }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="格口数量">
           {{ locker.compartmentCount }}格
@@ -92,46 +197,144 @@ const handleBack = () => {
         <el-descriptions-item label="所属单元">
           {{ locker.unitName }}
         </el-descriptions-item>
-        <el-descriptions-item label="安装位置">
-          {{ locker.installLocation || '-' }}
+        <el-descriptions-item label="楼层">
+          {{ locker.floor || '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="状态">
-          <el-tag :type="locker.status === 'ACTIVE' ? 'success' : 'danger'">
-            {{ locker.status === 'ACTIVE' ? '正常' : '停用' }}
-          </el-tag>
+        <el-descriptions-item label="安装日期">
+          {{ locker.installationDate || '-' }}
         </el-descriptions-item>
-        <el-descriptions-item label="备注">
-          {{ locker.remark || '-' }}
+        <el-descriptions-item label="当前状态">
+          <el-tag :type="statusTagType(locker.status)">{{ statusLabel(locker.status) }}</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="创建时间">
-          {{ locker.createdAt }}
+          {{ formatTime(locker.createTime) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="备注" :span="3">
+          {{ locker.remark || '-' }}
         </el-descriptions-item>
       </el-descriptions>
 
-      <div style="margin-top: 20px;">
+      <div class="action-bar">
         <el-button type="primary" @click="showAdjustDialog = true">调整归属</el-button>
+        <template v-if="locker.status === 'ACTIVE'">
+          <el-button type="warning" @click="openStatusDialog('TEMPORARILY_DISABLED')">临时停用</el-button>
+          <el-button type="danger" @click="openStatusDialog('PERMANENTLY_DISABLED')">永久停用</el-button>
+        </template>
+        <el-button
+          v-else-if="locker.status === 'TEMPORARILY_DISABLED'"
+          type="success"
+          @click="openStatusDialog('ACTIVE')"
+        >恢复使用</el-button>
+        <el-button
+          v-if="locker.status === 'TEMPORARILY_DISABLED'"
+          type="danger"
+          @click="openStatusDialog('PERMANENTLY_DISABLED')"
+        >永久停用</el-button>
+        <el-tag v-if="locker.status === 'PERMANENTLY_DISABLED'" type="info">
+          该柜体已永久停用，为终态，不可恢复
+        </el-tag>
       </div>
     </el-card>
 
-    <el-card title="归属调整历史" style="margin-top: 20px;">
-      <el-table :data="adjustmentRecords" border v-if="adjustmentRecords.length > 0">
+    <el-card style="margin-top: 20px;">
+      <template #header>
+        <div class="card-header">
+          <span>状态变更记录</span>
+          <el-select
+            v-model="statusFilter"
+            clearable
+            placeholder="按变更后状态筛选"
+            style="width: 180px"
+          >
+            <el-option
+              v-for="opt in statusFilterOptions"
+              :key="opt.value"
+              :label="opt.label"
+              :value="opt.value"
+            />
+          </el-select>
+        </div>
+      </template>
+      <el-table :data="filteredStatusRecords" border v-if="filteredStatusRecords.length > 0">
         <el-table-column prop="id" label="记录ID" width="80" />
-        <el-table-column label="调整前">
+        <el-table-column label="变更前状态" width="120">
           <template #default="{ row }">
-            {{ row.oldBuildingName }} {{ row.oldUnitName }}
+            <el-tag :type="statusTagType(row.oldStatus)">{{ statusLabel(row.oldStatus) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="调整后">
+        <el-table-column label="变更后状态" width="120">
+          <template #default="{ row }">
+            <el-tag :type="statusTagType(row.newStatus)">{{ statusLabel(row.newStatus) }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="reason" label="变更原因" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="operator" label="操作人" width="110">
+          <template #default="{ row }">{{ row.operator || '系统管理员' }}</template>
+        </el-table-column>
+        <el-table-column prop="changeTime" label="变更时间" width="180" />
+      </el-table>
+      <div v-else class="empty-tip">暂无状态变更记录</div>
+    </el-card>
+
+    <el-card style="margin-top: 20px;">
+      <template #header>归属调整历史</template>
+      <el-table :data="adjustmentRecords" border v-if="adjustmentRecords.length > 0">
+        <el-table-column prop="id" label="记录ID" width="80" />
+        <el-table-column label="调整前" min-width="160">
+          <template #default="{ row }">
+            {{ row.oldBuildingName || '-' }} {{ row.oldUnitName || '' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="调整后" min-width="160">
           <template #default="{ row }">
             {{ row.newBuildingName }} {{ row.newUnitName }}
           </template>
         </el-table-column>
-        <el-table-column prop="reason" label="调整原因" />
-        <el-table-column prop="createdAt" label="调整时间" />
+        <el-table-column prop="reason" label="调整原因" min-width="160" show-overflow-tooltip />
+        <el-table-column prop="operator" label="操作人" width="110">
+          <template #default="{ row }">{{ row.operator || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="adjustTime" label="调整时间" width="180" />
       </el-table>
       <div v-else class="empty-tip">暂无调整记录</div>
     </el-card>
 
+    <!-- 状态变更弹窗 -->
+    <el-dialog :title="statusDialogTitle" v-model="statusDialogVisible" width="480px">
+      <el-form :model="statusForm" label-width="90px">
+        <el-form-item label="当前状态">
+          <el-tag :type="statusTagType(locker?.status)">{{ statusLabel(locker?.status) }}</el-tag>
+          <span style="margin: 0 8px;">→</span>
+          <el-tag :type="statusTagType(statusAction)">{{ statusLabel(statusAction) }}</el-tag>
+        </el-form-item>
+        <el-form-item label="变更原因" required>
+          <el-input
+            v-model="statusForm.reason"
+            type="textarea"
+            :rows="3"
+            :placeholder="
+              statusAction === 'ACTIVE'
+                ? '请填写恢复原因'
+                : statusAction === 'TEMPORARILY_DISABLED'
+                  ? '请填写临时停用原因（如故障维修、停电等）'
+                  : '请填写永久停用原因（如报废、拆除等）'
+            "
+          />
+        </el-form-item>
+        <el-form-item label="操作人">
+          <el-input v-model="statusForm.operator" placeholder="请填写操作人，默认系统管理员" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="statusDialogVisible = false">取消</el-button>
+        <el-button
+          :type="statusAction === 'ACTIVE' ? 'success' : statusAction === 'PERMANENTLY_DISABLED' ? 'danger' : 'warning'"
+          @click="confirmStatusChange"
+        >确认</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 归属调整弹窗 -->
     <el-dialog title="调整归属" v-model="showAdjustDialog" width="500px">
       <el-form :model="adjustForm" label-width="100px">
         <el-form-item label="新楼栋">
@@ -162,8 +365,11 @@ const handleBack = () => {
             />
           </el-select>
         </el-form-item>
-        <el-form-item label="调整原因">
+        <el-form-item label="调整原因" required>
           <el-input v-model="adjustForm.reason" type="textarea" placeholder="请输入调整原因" />
+        </el-form-item>
+        <el-form-item label="操作人">
+          <el-input v-model="adjustForm.operator" placeholder="请填写操作人" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -190,6 +396,19 @@ const handleBack = () => {
   font-size: 20px;
   font-weight: 600;
   color: #333;
+}
+
+.action-bar {
+  margin-top: 20px;
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
 .empty-tip {

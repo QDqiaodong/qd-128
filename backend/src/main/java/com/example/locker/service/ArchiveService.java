@@ -5,6 +5,8 @@ import com.example.locker.dto.FilterRequest;
 import com.example.locker.dto.LockerDTO;
 import com.example.locker.entity.Archive;
 import com.example.locker.entity.ArchiveItem;
+import com.example.locker.entity.Locker;
+import com.example.locker.enums.LockerStatus;
 import com.example.locker.repository.ArchiveItemRepository;
 import com.example.locker.repository.ArchiveRepository;
 import com.example.locker.repository.LockerRepository;
@@ -17,6 +19,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -49,6 +52,9 @@ public class ArchiveService {
             ArchiveItem item = new ArchiveItem();
             item.setArchiveId(savedArchive.getId());
             item.setLockerId(lockerId);
+            // 记录归档时刻的柜体状态快照
+            lockerRepository.findById(lockerId).ifPresent(locker ->
+                    item.setStatusSnapshot(locker.getStatus()));
             archiveItemRepository.save(item);
         }
 
@@ -75,15 +81,35 @@ public class ArchiveService {
         archiveRepository.deleteById(id);
     }
 
+    /**
+     * 返回归档快照中的柜体列表，状态以归档时的快照为准，
+     * 即便柜体随后被停用/恢复，归档中仍可查看当时状态。
+     */
     public List<LockerDTO> getArchiveLockers(Long archiveId) {
         List<ArchiveItem> items = archiveItemRepository.findByArchiveId(archiveId);
-        List<Long> lockerIds = items.stream()
-                .map(ArchiveItem::getLockerId)
-                .collect(Collectors.toList());
 
-        return lockerIds.stream()
-                .map(lockerService::getLockerById)
-                .collect(Collectors.toList());
+        List<LockerDTO> result = new ArrayList<>();
+        for (ArchiveItem item : items) {
+            Locker locker = lockerRepository.findById(item.getLockerId()).orElse(null);
+            LockerDTO dto;
+            if (locker != null) {
+                dto = lockerService.convertToDTO(locker);
+            } else {
+                continue;
+            }
+
+            LockerStatus snapshot = item.getStatusSnapshot();
+            if (snapshot != null) {
+                dto.setSnapshotStatus(snapshot.name());
+                dto.setSnapshotStatusName(snapshot.getDisplayName());
+                dto.setFromSnapshot(true);
+                // 当前实时状态冗余一份，便于归档详情与快照状态对比
+                dto.setCurrentStatus(dto.getStatus());
+                dto.setCurrentStatusName(dto.getStatusName());
+            }
+            result.add(dto);
+        }
+        return result;
     }
 
     @Transactional

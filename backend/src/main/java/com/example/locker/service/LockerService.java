@@ -3,9 +3,12 @@ package com.example.locker.service;
 import com.example.locker.dto.*;
 import com.example.locker.entity.AdjustmentRecord;
 import com.example.locker.entity.Locker;
+import com.example.locker.entity.StatusChangeRecord;
+import com.example.locker.enums.LockerStatus;
 import com.example.locker.repository.AdjustmentRecordRepository;
 import com.example.locker.repository.BuildingRepository;
 import com.example.locker.repository.LockerRepository;
+import com.example.locker.repository.StatusChangeRecordRepository;
 import com.example.locker.repository.UnitRepository;
 import jakarta.persistence.criteria.Predicate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,8 +24,10 @@ import org.springframework.util.StringUtils;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.EnumSet;
 import java.util.stream.Collectors;
 
 @Service
@@ -39,6 +44,9 @@ public class LockerService {
 
     @Autowired
     private AdjustmentRecordRepository adjustmentRecordRepository;
+
+    @Autowired
+    private StatusChangeRecordRepository statusChangeRecordRepository;
 
     @Autowired
     private SpecTemplateService specTemplateService;
@@ -58,17 +66,38 @@ public class LockerService {
         dto.setCreateTime(locker.getCreateTime());
         dto.setUpdateTime(locker.getUpdateTime());
 
-        buildingRepository.findById(locker.getBuildingId()).ifPresent(building -> 
+        LockerStatus status = locker.getStatus() == null ? LockerStatus.ACTIVE : locker.getStatus();
+        dto.setStatus(status.name());
+        dto.setStatusName(status.getDisplayName());
+
+        buildingRepository.findById(locker.getBuildingId()).ifPresent(building ->
                 dto.setBuildingName(building.getName()));
-        unitRepository.findById(locker.getUnitId()).ifPresent(unit -> 
+        unitRepository.findById(locker.getUnitId()).ifPresent(unit ->
                 dto.setUnitName(unit.getName()));
 
         return dto;
     }
 
     public PageResponse<LockerDTO> getLockers(Integer page, Integer size) {
+        return getLockers(page, size, null);
+    }
+
+    /**
+     * 管理端柜体列表：默认展示全部状态，可按状态集合过滤。
+     */
+    public PageResponse<LockerDTO> getLockers(Integer page, Integer size, List<String> statuses) {
         Pageable pageable = PageRequest.of(page - 1, size, Sort.by(Sort.Direction.DESC, "createTime"));
-        Page<Locker> lockerPage = lockerRepository.findAll(pageable);
+
+        Page<Locker> lockerPage;
+        List<LockerStatus> parsed = parseStatuses(statuses);
+        if (parsed == null) {
+            lockerPage = lockerRepository.findAll(pageable);
+        } else {
+            Specification<Locker> spec = (root, query, cb) ->
+                    root.get("status").in(parsed);
+            lockerPage = lockerRepository.findAll(spec, pageable);
+        }
+
         List<LockerDTO> dtoList = lockerPage.getContent().stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
@@ -76,7 +105,7 @@ public class LockerService {
     }
 
     public LockerDTO getLockerById(Long id) {
-        Locker locker = lockerRepository.findById(id).orElseThrow(() -> 
+        Locker locker = lockerRepository.findById(id).orElseThrow(() ->
                 new RuntimeException("快递柜不存在: " + id));
         return convertToDTO(locker);
     }
@@ -96,6 +125,7 @@ public class LockerService {
         locker.setFloor(request.getFloor());
         locker.setInstallationDate(request.getInstallationDate());
         locker.setRemark(request.getRemark());
+        locker.setStatus(LockerStatus.ACTIVE);
 
         Locker saved = lockerRepository.save(locker);
         return convertToDTO(saved);
@@ -103,7 +133,7 @@ public class LockerService {
 
     @Transactional
     public LockerDTO updateLocker(Long id, LockerUpdateRequest request) {
-        Locker existing = lockerRepository.findById(id).orElseThrow(() -> 
+        Locker existing = lockerRepository.findById(id).orElseThrow(() ->
                 new RuntimeException("快递柜不存在: " + id));
 
         if (request.getLockerNo() != null && !request.getLockerNo().equals(existing.getLockerNo())) {
@@ -144,47 +174,31 @@ public class LockerService {
         lockerRepository.deleteById(id);
     }
 
+    /**
+     * 多条件筛选（分页）。停用柜体默认不出现，除非显式指定 statuses。
+     */
     public PageResponse<LockerDTO> filterLockers(FilterRequest request) {
-        Pageable pageable = PageRequest.of(request.getPage() - 1, request.getSize(), 
+        Pageable pageable = PageRequest.of(request.getPage() - 1, request.getSize(),
                 Sort.by(Sort.Direction.DESC, "createTime"));
 
-        Specification<Locker> spec = (root, query, cb) -> {
-            List<Predicate> predicates = new ArrayList<>();
-
-            if (request.getBuildingIds() != null && !request.getBuildingIds().isEmpty()) {
-                predicates.add(root.get("buildingId").in(request.getBuildingIds()));
-            }
-
-            if (request.getUnitIds() != null && !request.getUnitIds().isEmpty()) {
-                predicates.add(root.get("unitId").in(request.getUnitIds()));
-            }
-
-            if (request.getSpecTypes() != null && !request.getSpecTypes().isEmpty()) {
-                predicates.add(root.get("specType").in(request.getSpecTypes()));
-            }
-
-            if (StringUtils.hasText(request.getStartDate())) {
-                LocalDate startDate = LocalDate.parse(request.getStartDate(), DateTimeFormatter.ISO_LOCAL_DATE);
-                predicates.add(cb.greaterThanOrEqualTo(root.get("installationDate"), startDate));
-            }
-
-            if (StringUtils.hasText(request.getEndDate())) {
-                LocalDate endDate = LocalDate.parse(request.getEndDate(), DateTimeFormatter.ISO_LOCAL_DATE);
-                predicates.add(cb.lessThanOrEqualTo(root.get("installationDate"), endDate));
-            }
-
-            return cb.and(predicates.toArray(new Predicate[0]));
-        };
-
-        Page<Locker> lockerPage = lockerRepository.findAll(spec, pageable);
+        Page<Locker> lockerPage = lockerRepository.findAll(buildFilterSpec(request, true), pageable);
         List<LockerDTO> dtoList = lockerPage.getContent().stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
         return new PageResponse<>(dtoList, lockerPage.getTotalElements(), request.getPage(), request.getSize());
     }
 
+    /**
+     * 供归档使用的多条件筛选（不分页）。停用柜体默认不出现，除非显式指定 statuses。
+     */
     public List<LockerDTO> filterLockersForArchive(FilterRequest request) {
-        Specification<Locker> spec = (root, query, cb) -> {
+        List<Locker> lockers = lockerRepository.findAll(buildFilterSpec(request, true));
+        return lockers.stream().map(this::convertToDTO).collect(Collectors.toList());
+    }
+
+    private Specification<Locker> buildFilterSpec(FilterRequest request, boolean excludeDisabledByDefault) {
+        List<LockerStatus> parsed = parseStatuses(request.getStatuses());
+        return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
             if (request.getBuildingIds() != null && !request.getBuildingIds().isEmpty()) {
@@ -209,20 +223,58 @@ public class LockerService {
                 predicates.add(cb.lessThanOrEqualTo(root.get("installationDate"), endDate));
             }
 
+            if (parsed != null) {
+                predicates.add(root.get("status").in(parsed));
+            } else if (excludeDisabledByDefault) {
+                // 多条件筛选默认只返回正常柜体
+                predicates.add(cb.equal(root.get("status"), LockerStatus.ACTIVE));
+            }
+
             return cb.and(predicates.toArray(new Predicate[0]));
         };
+    }
 
-        List<Locker> lockers = lockerRepository.findAll(spec);
-        return lockers.stream().map(this::convertToDTO).collect(Collectors.toList());
+    /**
+     * 解析状态过滤参数：null/空返回 null（表示不按状态过滤），非法值抛出异常。
+     */
+    private List<LockerStatus> parseStatuses(List<String> statuses) {
+        if (statuses == null || statuses.isEmpty()) {
+            return null;
+        }
+        List<LockerStatus> result = new ArrayList<>();
+        for (String code : statuses) {
+            if (StringUtils.hasText(code)) {
+                result.add(LockerStatus.fromCode(code.trim()));
+            }
+        }
+        return result.isEmpty() ? null : result;
     }
 
     public List<AdjustmentRecord> getAdjustmentRecords(Long lockerId) {
-        return adjustmentRecordRepository.findByLockerIdOrderByAdjustTimeDesc(lockerId);
+        List<AdjustmentRecord> records =
+                adjustmentRecordRepository.findByLockerIdOrderByAdjustTimeDesc(lockerId);
+        records.forEach(this::fillAdjustmentNames);
+        return records;
+    }
+
+    private void fillAdjustmentNames(AdjustmentRecord record) {
+        if (record.getOldBuildingId() != null) {
+            buildingRepository.findById(record.getOldBuildingId())
+                    .ifPresent(b -> record.setOldBuildingName(b.getName()));
+        }
+        if (record.getOldUnitId() != null) {
+            unitRepository.findById(record.getOldUnitId())
+                    .ifPresent(u -> record.setOldUnitName(u.getName()));
+        }
+        buildingRepository.findById(record.getNewBuildingId())
+                .ifPresent(b -> record.setNewBuildingName(b.getName()));
+        unitRepository.findById(record.getNewUnitId())
+                .ifPresent(u -> record.setNewUnitName(u.getName()));
     }
 
     @Transactional
     public AdjustmentRecord adjustLocker(Long lockerId, AdjustRequest request) {
-        Locker locker = lockerRepository.findById(lockerId).orElseThrow(() -> 
+        Locker locker = lockerRepository.findById(lockerId).orElseThrow(() ->
                 new RuntimeException("快递柜不存在: " + lockerId));
 
         AdjustmentRecord record = new AdjustmentRecord();
@@ -238,7 +290,97 @@ public class LockerService {
         locker.setUnitId(request.getNewUnitId());
         lockerRepository.save(locker);
 
-        return adjustmentRecordRepository.save(record);
+        AdjustmentRecord saved = adjustmentRecordRepository.save(record);
+        fillAdjustmentNames(saved);
+        return saved;
+    }
+
+    // ===================== 生命周期状态管理 =====================
+
+    /**
+     * 变更柜体生命周期状态并记录前后状态、原因、操作人及时间。
+     */
+    @Transactional
+    public StatusChangeRecord changeLockerStatus(Long lockerId, StatusChangeRequest request) {
+        if (request == null || !StringUtils.hasText(request.getTargetStatus())) {
+            throw new IllegalArgumentException("请选择目标状态");
+        }
+        if (!StringUtils.hasText(request.getReason())) {
+            throw new IllegalArgumentException("请填写状态变更原因");
+        }
+
+        Locker locker = lockerRepository.findById(lockerId).orElseThrow(() ->
+                new RuntimeException("快递柜不存在: " + lockerId));
+
+        LockerStatus target;
+        try {
+            target = LockerStatus.fromCode(request.getTargetStatus().trim());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(e.getMessage());
+        }
+
+        LockerStatus current = locker.getStatus() == null ? LockerStatus.ACTIVE : locker.getStatus();
+        validateTransition(current, target);
+
+        String operator = StringUtils.hasText(request.getOperator())
+                ? request.getOperator().trim() : "系统管理员";
+
+        StatusChangeRecord record = new StatusChangeRecord();
+        record.setLockerId(lockerId);
+        record.setOldStatus(current);
+        record.setNewStatus(target);
+        record.setReason(request.getReason().trim());
+        record.setOperator(operator);
+
+        locker.setStatus(target);
+        lockerRepository.save(locker);
+
+        return statusChangeRecordRepository.save(record);
+    }
+
+    /**
+     * 合法流转：
+     * 正常 -> 临时停用 / 永久停用
+     * 临时停用 -> 正常(恢复) / 永久停用
+     * 永久停用为终态，不可再变更。
+     */
+    private void validateTransition(LockerStatus from, LockerStatus to) {
+        if (from == to) {
+            throw new IllegalArgumentException("柜体当前已是「" + from.getDisplayName() + "」状态，无需重复变更");
+        }
+        if (from == LockerStatus.PERMANENTLY_DISABLED) {
+            throw new IllegalArgumentException("柜体已永久停用，为终态，不可恢复或变更");
+        }
+        EnumSet<LockerStatus> allowed;
+        if (from == LockerStatus.ACTIVE) {
+            allowed = EnumSet.of(LockerStatus.TEMPORARILY_DISABLED, LockerStatus.PERMANENTLY_DISABLED);
+        } else {
+            allowed = EnumSet.of(LockerStatus.ACTIVE, LockerStatus.PERMANENTLY_DISABLED);
+        }
+        if (!allowed.contains(to)) {
+            throw new IllegalArgumentException(
+                    "不允许从「" + from.getDisplayName() + "」变更为「" + to.getDisplayName() + "」");
+        }
+    }
+
+    /**
+     * 查询柜体完整状态变更记录，可按变更后状态筛选。
+     */
+    public List<StatusChangeRecord> getStatusChangeRecords(Long lockerId, String status) {
+        if (StringUtils.hasText(status)) {
+            LockerStatus target = LockerStatus.fromCode(status.trim());
+            return statusChangeRecordRepository
+                    .findByLockerIdAndNewStatusOrderByChangeTimeDesc(lockerId, target);
+        }
+        return statusChangeRecordRepository.findByLockerIdOrderByChangeTimeDesc(lockerId);
+    }
+
+    public Map<String, String> getStatusMap() {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (LockerStatus status : LockerStatus.values()) {
+            map.put(status.name(), status.getDisplayName());
+        }
+        return map;
     }
 
     public List<String> getSpecTypes() {
