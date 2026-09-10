@@ -129,6 +129,20 @@ export interface UnitDTO {
   buildingId: number
 }
 
+/** 物业层级删除前的关联影响统计 */
+export interface HierarchyReference {
+  id: number
+  type: 'BUILDING' | 'UNIT'
+  /** 关联快递柜数量 */
+  lockerCount: number
+  /** 关联归档快照数量（去重） */
+  archiveCount: number
+  /** 楼栋下的单元数量（仅楼栋） */
+  unitCount: number
+  /** 是否允许删除 */
+  deletable: boolean
+}
+
 export interface Archive {
   id: number
   archiveName: string
@@ -230,16 +244,20 @@ export const buildingApi = {
     return api.get<UnitDTO[]>(`/buildings/${buildingId}/units`)
   },
 
-  createBuilding(data: { name: string; code: string; sortOrder?: number }) {
+  createBuilding(data: { name: string; code?: string; sortOrder?: number }) {
     return api.post('/buildings', data)
   },
 
-  updateBuilding(id: number, data: { name: string; code: string; sortOrder?: number }) {
+  updateBuilding(id: number, data: { name: string; code?: string; sortOrder?: number }) {
     return api.put(`/buildings/${id}`, data)
   },
 
   deleteBuilding(id: number) {
     return api.delete(`/buildings/${id}`)
+  },
+
+  getBuildingReferences(id: number) {
+    return api.get<HierarchyReference>(`/buildings/${id}/references`)
   },
 
   createUnit(data: { buildingId: number; name: string; code?: string; sortOrder?: number }) {
@@ -252,6 +270,10 @@ export const buildingApi = {
 
   deleteUnit(id: number) {
     return api.delete(`/units/${id}`)
+  },
+
+  getUnitReferences(id: number) {
+    return api.get<HierarchyReference>(`/units/${id}/references`)
   }
 }
 

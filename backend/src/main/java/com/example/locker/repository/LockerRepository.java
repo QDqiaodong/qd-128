@@ -20,5 +20,9 @@ public interface LockerRepository extends JpaRepository<Locker, Long>, JpaSpecif
 
     List<Locker> findByUnitId(Long unitId);
 
+    long countByBuildingId(Long buildingId);
+
+    long countByUnitId(Long unitId);
+
     Page<Locker> findAll(Pageable pageable);
 }

@@ -1,6 +1,7 @@
 package com.example.locker.controller;
 
 import com.example.locker.dto.BuildingTreeDTO;
+import com.example.locker.dto.HierarchyReferenceDTO;
 import com.example.locker.dto.UnitDTO;
 import com.example.locker.entity.Building;
 import com.example.locker.entity.Unit;
@@ -33,6 +34,11 @@ public class BuildingController {
         return ResponseEntity.ok(buildingService.getUnitsByBuildingId(id));
     }
 
+    @GetMapping("/buildings/{id}/references")
+    public ResponseEntity<HierarchyReferenceDTO> getBuildingReferences(@PathVariable Long id) {
+        return ResponseEntity.ok(buildingService.getBuildingReferences(id));
+    }
+
     @PostMapping("/buildings")
     public ResponseEntity<Building> createBuilding(@RequestBody Building building) {
         return ResponseEntity.ok(buildingService.createBuilding(building));
@@ -63,5 +69,10 @@ public class BuildingController {
     public ResponseEntity<Void> deleteUnit(@PathVariable Long id) {
         unitService.deleteUnit(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/units/{id}/references")
+    public ResponseEntity<HierarchyReferenceDTO> getUnitReferences(@PathVariable Long id) {
+        return ResponseEntity.ok(unitService.getUnitReferences(id));
     }
 }

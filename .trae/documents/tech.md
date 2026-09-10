@@ -68,6 +68,27 @@ flowchart TB
 | GET | /api/buildings/{id}/units | 获取楼栋下的单元列表 |
 | POST | /api/buildings | 新增楼栋 |
 | POST | /api/units | 新增单元 |
+| PUT | /api/buildings/{id} | 修改楼栋名称/编码/排序 |
+| PUT | /api/units/{id} | 修改单元名称/编码/排序 |
+| DELETE | /api/buildings/{id} | 删除楼栋（有关联快递柜或归档快照时禁止） |
+| DELETE | /api/units/{id} | 删除单元（有关联快递柜或归档快照时禁止） |
+| GET | /api/buildings/{id}/references | 删除前查询楼栋关联影响数量 |
+| GET | /api/units/{id}/references | 删除前查询单元关联影响数量 |
+
+删除前关联影响响应（HierarchyReferenceDTO）：
+```json
+{
+  "id": 1,
+  "type": "BUILDING",
+  "lockerCount": 12,
+  "archiveCount": 3,
+  "unitCount": 4,
+  "deletable": false
+}
+```
+- `lockerCount`：关联快递柜数量；`archiveCount`：引用这些快递柜的归档快照数量（去重）
+- `lockerCount` 或 `archiveCount` 大于 0 时 `deletable=false`，删除接口返回 400 并提示影响数量
+- 楼栋编码全局唯一校验；单元编码在同一楼栋下唯一校验
 
 ### 4.3 归属调整相关
 | Method | Endpoint | Description |

@@ -74,3 +74,14 @@ Docker Compose 使用固定端口并绑定 `127.0.0.1`；前后端 Dockerfile �
 - `POST /api/lockers/{id}/status`：变更状态，body 为 `{ targetStatus, reason, operator }`
 - `GET  /api/lockers/{id}/status-changes?status=`：查询完整状态变更记录，可按状态筛选
 - `GET  /api/lockers/statuses`：获取状态码与中文名映射
+
+## 物业层级维护（楼栋 / 单元）
+
+「物业层级管理」页面（`/hierarchy`）以树形结构维护楼栋与单元，支持新增、改名、编码调整和删除。
+
+- 楼栋编码全局唯一；单元编码在同一楼栋下唯一（均可留空）。
+- 删除前系统检查关联快递柜及归档快照：
+  - `GET /api/buildings/{id}/references` / `GET /api/units/{id}/references` 返回 `{ lockerCount, archiveCount, unitCount, deletable }`。
+  - 存在关联快递柜（`lockerCount > 0`）或归档快照（`archiveCount > 0`）时禁止删除，前端展示受影响数量。
+  - 楼栋无关联时，其下单元随楼栋一并删除。
+- 名称或编码只保存在 `building`/`unit` 表，快递柜列表、详情、多条件筛选结果、归档快照和归属调整历史均通过 ID 实时关联解析，改名或调整编码后各页面自动显示最新层级信息。

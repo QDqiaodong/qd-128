@@ -5,6 +5,7 @@ import {
   Box as Package,
   Filter,
   Folder as Archive,
+  OfficeBuilding as Building,
   Expand,
   Fold
 } from '@element-plus/icons-vue'
@@ -35,6 +36,10 @@ const handleMenuSelect = (index: string) => {
           <DashboardIcon />
           <span>首页</span>
         </el-menu-item>
+        <el-menu-item index="/hierarchy">
+          <Building />
+          <span>物业层级管理</span>
+        </el-menu-item>
         <el-sub-menu index="/lockers">
           <template #title>
             <Package />
@@ -59,6 +64,7 @@ const handleMenuSelect = (index: string) => {
       <el-header class="header">
         <div class="header-title">
           <template v-if="route.path === '/'">首页概览</template>
+          <template v-else-if="route.path === '/hierarchy'">物业层级管理</template>
           <template v-else-if="route.path === '/lockers'">快递柜列表</template>
           <template v-else-if="route.path === '/lockers/create'">新增快递柜</template>
           <template v-else-if="route.path === '/lockers/edit'">编辑快递柜</template>

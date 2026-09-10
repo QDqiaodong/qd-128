@@ -12,4 +12,8 @@ public interface BuildingRepository extends JpaRepository<Building, Long> {
     List<Building> findAllByOrderBySortOrderAsc();
 
     Building findByCode(String code);
+
+    boolean existsByCode(String code);
+
+    boolean existsByCodeAndIdNot(String code, Long id);
 }
