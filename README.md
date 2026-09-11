@@ -52,6 +52,15 @@ Docker Compose 使用固定端口并绑定 `127.0.0.1`；前后端 Dockerfile �
 - 前端构建失败时优先按实际报错检查 import 路径、导出名、Vite 代理端口和 TypeScript 构建错误。
 - 页面中文乱码时检查源码、SQL 初始化脚本、数据库字符集、连接串编码和已有 Docker volume 数据；初始化 SQL 已增加 `SET NAMES utf8mb4;`。
 
+## 种子数据与补种机制
+
+系统预置种子数据：3 栋楼（B001-B003）、5 个单元（U001-U005）、4 台编号快递柜（KDG-001 ~ KDG-004）。
+
+- `schema.sql` 仅在 MySQL 数据卷**首次为空**时由容器自动执行一次；所有种子语句均已幂等化（`INSERT IGNORE` / 按编码判重），重复执行或手动补种不会产生重复数据，也不会因楼栋已存在而中断后续柜体种子。
+- 后端每次启动时执行 `SeedDataInitializer`，按编码逐条检查并**只补缺失**的种子记录（不修改已有数据），随后刷新楼栋/单元缓存。因此旧数据卷（只有楼栋单元、缺柜体种子）在后端升级重启后会自动补齐柜体，快递柜列表与可巡检范围随即恢复一致。
+- 如需手动补种，可执行：`docker exec -i locker-mysql mysql -ulocker -p<密码> locker_db < backend/src/main/resources/schema.sql`。
+- 如需完全重置（清空全部业务数据并重新初始化）：`docker compose down -v && docker compose up -d --build`。
+
 ## 柜体生命周期状态
 
 每个快递柜具有可追踪的生命周期状态（`locker.status`），共三种：

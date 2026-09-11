@@ -139,31 +139,56 @@ CREATE TABLE IF NOT EXISTS inspection_issue (
     FOREIGN KEY (locker_id) REFERENCES locker(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='巡检异常待处理记录表';
 
-INSERT INTO building (name, code, sort_order) VALUES
+-- ===================== 种子数据（幂等，可重复执行） =====================
+-- 说明：docker-entrypoint-initdb.d 只在空数据卷首次初始化时执行本脚本；
+-- 若数据卷中已有楼栋/单元（旧版本初始化、初始化中断后重启等），
+-- 普通 INSERT 会因唯一键冲突中断整个脚本，导致后面的柜体种子永远插不进去。
+-- 因此所有种子语句都做到可重复执行：已有记录跳过，缺失记录补种。
+
+-- 楼栋：code 全局唯一，INSERT IGNORE 跳过已存在的编码
+INSERT IGNORE INTO building (name, code, sort_order) VALUES
 ('1号楼', 'B001', 1),
 ('2号楼', 'B002', 2),
 ('3号楼', 'B003', 3);
 
-INSERT INTO unit (building_id, name, code, sort_order) VALUES
-(1, '1单元', 'U001', 1),
-(1, '2单元', 'U002', 2),
-(2, '1单元', 'U003', 1),
-(2, '2单元', 'U004', 2),
-(3, '1单元', 'U005', 1);
+-- 单元：按楼栋编码实时解析 building_id（不依赖固定自增 ID），同编码单元已存在则跳过
+INSERT INTO unit (building_id, name, code, sort_order)
+SELECT b.id, '1单元', 'U001', 1 FROM building b
+WHERE b.code = 'B001' AND NOT EXISTS (SELECT 1 FROM unit u WHERE u.code = 'U001');
 
-INSERT INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
-SELECT * FROM (SELECT 'KDG-001' AS locker_no, 24 AS compartment_count, 'STANDARD' AS spec_type,
-       1 AS building_id, 1 AS unit_id, '1层' AS floor, '2024-03-01' AS installation_date, 'ACTIVE' AS status) AS t
-WHERE NOT EXISTS (SELECT 1 FROM locker WHERE locker_no = 'KDG-001');
+INSERT INTO unit (building_id, name, code, sort_order)
+SELECT b.id, '2单元', 'U002', 2 FROM building b
+WHERE b.code = 'B001' AND NOT EXISTS (SELECT 1 FROM unit u WHERE u.code = 'U002');
 
-INSERT INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
-SELECT * FROM (SELECT 'KDG-002', 36, 'LARGE', 1, 2, '1层', '2024-03-05', 'ACTIVE') AS t
-WHERE NOT EXISTS (SELECT 1 FROM locker WHERE locker_no = 'KDG-002');
+INSERT INTO unit (building_id, name, code, sort_order)
+SELECT b.id, '1单元', 'U003', 1 FROM building b
+WHERE b.code = 'B002' AND NOT EXISTS (SELECT 1 FROM unit u WHERE u.code = 'U003');
 
-INSERT INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
-SELECT * FROM (SELECT 'KDG-003', 18, 'SMALL', 2, 3, '1层', '2024-04-10', 'ACTIVE') AS t
-WHERE NOT EXISTS (SELECT 1 FROM locker WHERE locker_no = 'KDG-003');
+INSERT INTO unit (building_id, name, code, sort_order)
+SELECT b.id, '2单元', 'U004', 2 FROM building b
+WHERE b.code = 'B002' AND NOT EXISTS (SELECT 1 FROM unit u WHERE u.code = 'U004');
 
-INSERT INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
-SELECT * FROM (SELECT 'KDG-004', 30, 'MIXED', 3, 5, '1层', '2024-05-12', 'ACTIVE') AS t
-WHERE NOT EXISTS (SELECT 1 FROM locker WHERE locker_no = 'KDG-004');
+INSERT INTO unit (building_id, name, code, sort_order)
+SELECT b.id, '1单元', 'U005', 1 FROM building b
+WHERE b.code = 'B003' AND NOT EXISTS (SELECT 1 FROM unit u WHERE u.code = 'U005');
+
+-- 快递柜：按楼栋/单元编码实时解析归属 ID，locker_no 唯一，INSERT IGNORE 跳过已存在编号
+INSERT IGNORE INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
+SELECT 'KDG-001', 24, 'STANDARD', b.id, u.id, '1层', '2024-03-01', 'ACTIVE'
+FROM building b JOIN unit u ON u.code = 'U001' AND u.building_id = b.id
+WHERE b.code = 'B001';
+
+INSERT IGNORE INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
+SELECT 'KDG-002', 36, 'LARGE', b.id, u.id, '1层', '2024-03-05', 'ACTIVE'
+FROM building b JOIN unit u ON u.code = 'U002' AND u.building_id = b.id
+WHERE b.code = 'B001';
+
+INSERT IGNORE INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
+SELECT 'KDG-003', 18, 'SMALL', b.id, u.id, '1层', '2024-04-10', 'ACTIVE'
+FROM building b JOIN unit u ON u.code = 'U003' AND u.building_id = b.id
+WHERE b.code = 'B002';
+
+INSERT IGNORE INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
+SELECT 'KDG-004', 30, 'MIXED', b.id, u.id, '1层', '2024-05-12', 'ACTIVE'
+FROM building b JOIN unit u ON u.code = 'U005' AND u.building_id = b.id
+WHERE b.code = 'B003';
