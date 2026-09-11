@@ -8,6 +8,7 @@ import com.example.locker.entity.Locker;
 import com.example.locker.entity.Unit;
 import com.example.locker.repository.ArchiveItemRepository;
 import com.example.locker.repository.BuildingRepository;
+import com.example.locker.repository.InspectionTaskRepository;
 import com.example.locker.repository.LockerRepository;
 import com.example.locker.repository.UnitRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -35,6 +36,9 @@ public class BuildingService {
 
     @Autowired
     private ArchiveItemRepository archiveItemRepository;
+
+    @Autowired
+    private InspectionTaskRepository inspectionTaskRepository;
 
     @Cacheable(value = "buildingTree", key = "'tree'")
     public List<BuildingTreeDTO> getBuildingTree() {
@@ -135,6 +139,10 @@ public class BuildingService {
         HierarchyReferenceDTO ref = getBuildingReferences(id);
         if (ref.getLockerCount() > 0 || ref.getArchiveCount() > 0) {
             throw new IllegalArgumentException(buildDeleteBlockedMessage(ref));
+        }
+        long taskCount = inspectionTaskRepository.countByBuildingId(id);
+        if (taskCount > 0) {
+            throw new IllegalArgumentException("存在 " + taskCount + " 个按该楼栋发起的巡检任务，禁止删除楼栋");
         }
         // 无关联柜体，先显式删除单元，再删除楼栋，避免不同数据库外键级联行为差异
         unitRepository.deleteByBuildingId(id);

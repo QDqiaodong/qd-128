@@ -85,3 +85,40 @@ Docker Compose 使用固定端口并绑定 `127.0.0.1`；前后端 Dockerfile �
   - 存在关联快递柜（`lockerCount > 0`）或归档快照（`archiveCount > 0`）时禁止删除，前端展示受影响数量。
   - 楼栋无关联时，其下单元随楼栋一并删除。
 - 名称或编码只保存在 `building`/`unit` 表，快递柜列表、详情、多条件筛选结果、归档快照和归属调整历史均通过 ID 实时关联解析，改名或调整编码后各页面自动显示最新层级信息。
+
+## 物业巡检模块
+
+「物业巡检」页面（`/inspections`）供管理员按楼栋/单元发起快递柜巡检任务，并逐台登记格口、屏幕、门锁等检查项。
+
+### 发起任务
+
+- 在「发起巡检任务」页选择**楼栋**（必填）与**单元**（不选则巡检整栋楼），系统按发起时刻该范围内的在管快递柜逐台冻结生成巡检明细，之后柜体归属调整不影响任务的柜体关联关系。
+- 可设置**巡检周期**（一次性/每日/每周/每月）、**负责人**、**截止时间**和创建人；所选范围内没有快递柜时不允许发起。
+
+### 逐台巡检与异常记录
+
+- 任务详情中对每台快递柜的**格口、屏幕、门锁**分别登记「正常 / 异常 / 不适用」，可填备注和巡检人，逐台保存。
+- 任一检查项标记为**异常**时自动生成一条「待处理」异常记录（`inspection_issue`）；复检恢复正常时，仍处于待处理的记录会自动关闭，已在处理中/已解决的记录保留处理痕迹。同一检查项在存在未关闭记录时不会重复生成。
+- 异常记录支持「开始处理」「标记解决」，并记录处理人、处理说明和处理时间，可在任务详情中按处理状态筛选。
+
+### 任务进度与筛选
+
+- 任务进度（已检/应检台数与百分比）、异常柜体数、待处理异常数全部以巡检明细表和异常表为唯一数据源，由后端在每次提交/处理后统一重算，**刷新页面后保持一致**。
+- 列表支持按**未完成**（待开始 + 进行中）、**逾期**（已过截止时间且未完成）、**异常**（存在待处理异常）筛选，并可按任务名称/负责人关键字搜索。
+- 任务状态：待开始 → 进行中 → 已完成（全部柜体完成填报）；截止时间已过但未完成的任务展示为「已逾期」。
+
+### 数据一致性
+
+- 巡检任务仅以 ID 关联楼栋/单元（不建外键），层级改名后任务与详情实时显示最新名称；仍被巡检任务引用的楼栋/单元禁止删除（见「物业层级管理」删除前校验）。
+- 删除巡检任务会一并删除其巡检明细与异常记录。
+
+相关接口（前缀 `/api/inspections`）：
+
+- `POST /api/inspections`：发起任务，body 含 `taskName, buildingId, unitId?, cycle, assignee?, deadline?, creator?`
+- `GET  /api/inspections?status=&keyword=&overdue=&abnormal=`：分页任务列表，`status=INCOMPLETE` 表示未完成
+- `GET  /api/inspections/{id}` / `DELETE /api/inspections/{id}`：任务详情 / 删除
+- `GET  /api/inspections/{id}/records`：任务下逐台柜体的检查项明细
+- `POST /api/inspections/{id}/submit`：提交逐台检查结果（body 为 `{ items: [{ lockerId, compartmentResult, screenResult, lockResult, remark?, inspector? }] }`，结果取值 `NORMAL/ABNORMAL/NOT_APPLICABLE`）
+- `GET  /api/inspections/{id}/issues?status=`：异常待处理记录，可按 `PENDING/PROCESSING/RESOLVED` 筛选
+- `PUT  /api/inspections/issues/{issueId}`：更新异常处理状态，body 为 `{ status, handler?, handleNote? }`
+- `GET  /api/inspections/cycles` / `GET  /api/inspections/task-statuses`：周期、任务状态字典

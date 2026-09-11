@@ -5,6 +5,7 @@ import com.example.locker.dto.UnitDTO;
 import com.example.locker.entity.Locker;
 import com.example.locker.entity.Unit;
 import com.example.locker.repository.BuildingRepository;
+import com.example.locker.repository.InspectionTaskRepository;
 import com.example.locker.repository.LockerRepository;
 import com.example.locker.repository.UnitRepository;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,6 +28,9 @@ public class UnitService {
 
     @Autowired
     private LockerRepository lockerRepository;
+
+    @Autowired
+    private InspectionTaskRepository inspectionTaskRepository;
 
     @Autowired
     private BuildingService buildingService;
@@ -88,6 +92,10 @@ public class UnitService {
         HierarchyReferenceDTO ref = getUnitReferences(id);
         if (ref.getLockerCount() > 0 || ref.getArchiveCount() > 0) {
             throw new IllegalArgumentException(BuildingService.buildDeleteBlockedMessage(ref));
+        }
+        long taskCount = inspectionTaskRepository.countByUnitId(id);
+        if (taskCount > 0) {
+            throw new IllegalArgumentException("存在 " + taskCount + " 个按该单元发起的巡检任务，禁止删除单元");
         }
         unitRepository.deleteById(id);
     }

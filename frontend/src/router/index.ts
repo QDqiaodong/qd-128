@@ -6,6 +6,9 @@ import LockerDetail from '@/views/LockerDetail.vue'
 import FilterSearch from '@/views/FilterSearch.vue'
 import ArchiveList from '@/views/ArchiveList.vue'
 import HierarchyManage from '@/views/HierarchyManage.vue'
+import InspectionList from '@/views/InspectionList.vue'
+import InspectionCreate from '@/views/InspectionCreate.vue'
+import InspectionDetail from '@/views/InspectionDetail.vue'
 
 const routes = [
   { path: '/', name: 'Dashboard', component: Dashboard },
@@ -15,7 +18,10 @@ const routes = [
   { path: '/lockers/:id/edit', name: 'LockerEdit', component: LockerForm },
   { path: '/lockers/:id', name: 'LockerDetail', component: LockerDetail },
   { path: '/filter', name: 'FilterSearch', component: FilterSearch },
-  { path: '/archives', name: 'ArchiveList', component: ArchiveList }
+  { path: '/archives', name: 'ArchiveList', component: ArchiveList },
+  { path: '/inspections', name: 'InspectionList', component: InspectionList },
+  { path: '/inspections/create', name: 'InspectionCreate', component: InspectionCreate },
+  { path: '/inspections/:id', name: 'InspectionDetail', component: InspectionDetail }
 ]
 
 const router = createRouter({

@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import {
   DataBoard as DashboardIcon,
   Box as Package,
   Filter,
   Folder as Archive,
   OfficeBuilding as Building,
+  CircleCheck,
   Expand,
   Fold
 } from '@element-plus/icons-vue'
@@ -14,6 +15,12 @@ import { useRouter, useRoute } from 'vue-router'
 const router = useRouter()
 const route = useRoute()
 const collapsed = ref(false)
+
+// 子页面（如巡检详情、发起页）也高亮所属一级菜单
+const activeMenu = computed(() => {
+  if (route.path.startsWith('/inspections')) return '/inspections'
+  return route.path
+})
 
 const handleMenuSelect = (index: string) => {
   router.push(index)
@@ -27,7 +34,7 @@ const handleMenuSelect = (index: string) => {
         <span v-if="!collapsed">快递柜管理系统</span>
       </div>
       <el-menu
-        :default-active="route.path"
+        :default-active="activeMenu"
         class="sidebar-menu"
         mode="vertical"
         @select="handleMenuSelect"
@@ -58,6 +65,10 @@ const handleMenuSelect = (index: string) => {
           <Archive />
           <span>归档管理</span>
         </el-menu-item>
+        <el-menu-item index="/inspections">
+          <CircleCheck />
+          <span>物业巡检</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container class="main-content">
@@ -71,6 +82,9 @@ const handleMenuSelect = (index: string) => {
           <template v-else-if="route.path.includes('/lockers/')">快递柜详情</template>
           <template v-else-if="route.path === '/filter'">多条件筛选</template>
           <template v-else-if="route.path === '/archives'">归档管理</template>
+          <template v-else-if="route.path === '/inspections'">物业巡检</template>
+          <template v-else-if="route.path === '/inspections/create'">发起巡检任务</template>
+          <template v-else-if="route.path.includes('/inspections/')">巡检任务详情</template>
         </div>
         <div class="header-actions">
           <button class="collapse-btn" @click="collapsed = !collapsed">

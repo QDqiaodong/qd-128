@@ -81,6 +81,64 @@ CREATE TABLE IF NOT EXISTS archive_item (
     FOREIGN KEY (locker_id) REFERENCES locker(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='归档明细表';
 
+CREATE TABLE IF NOT EXISTS inspection_task (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    task_name VARCHAR(200) NOT NULL COMMENT '巡检任务名称',
+    building_id BIGINT NOT NULL COMMENT '巡检楼栋ID',
+    unit_id BIGINT COMMENT '巡检单元ID，为空表示整栋楼',
+    cycle VARCHAR(20) NOT NULL DEFAULT 'ONCE' COMMENT '巡检周期: ONCE-一次性, DAILY-每日, WEEKLY-每周, MONTHLY-每月',
+    assignee VARCHAR(50) COMMENT '负责人',
+    deadline DATETIME COMMENT '截止时间',
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT '任务状态: PENDING-待开始, IN_PROGRESS-进行中, COMPLETED-已完成',
+    total_lockers INT NOT NULL DEFAULT 0 COMMENT '应检柜体总数',
+    completed_lockers INT NOT NULL DEFAULT 0 COMMENT '已检柜体数',
+    abnormal_count INT NOT NULL DEFAULT 0 COMMENT '异常柜体数',
+    pending_issue_count INT NOT NULL DEFAULT 0 COMMENT '待处理异常记录数(含处理中)',
+    creator VARCHAR(50) COMMENT '创建人',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_inspection_building (building_id),
+    INDEX idx_inspection_unit (unit_id),
+    INDEX idx_inspection_status (status)
+    -- 仅按 ID 关联楼栋/单元而不加外键，避免与物业层级删除流程冲突；层级名称实时按 ID 解析
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜巡检任务表';
+
+CREATE TABLE IF NOT EXISTS inspection_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT NOT NULL COMMENT '巡检任务ID',
+    locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    compartment_result VARCHAR(20) COMMENT '格口检查结果: NORMAL/ABNORMAL/NOT_APPLICABLE',
+    screen_result VARCHAR(20) COMMENT '屏幕检查结果: NORMAL/ABNORMAL/NOT_APPLICABLE',
+    lock_result VARCHAR(20) COMMENT '门锁检查结果: NORMAL/ABNORMAL/NOT_APPLICABLE',
+    remark TEXT COMMENT '备注',
+    inspector VARCHAR(50) COMMENT '巡检人',
+    inspect_time DATETIME COMMENT '巡检时间',
+    UNIQUE KEY uk_task_locker (task_id, locker_id),
+    INDEX idx_record_task (task_id),
+    FOREIGN KEY (task_id) REFERENCES inspection_task(id) ON DELETE CASCADE,
+    FOREIGN KEY (locker_id) REFERENCES locker(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='巡检明细表（任务-柜体）';
+
+CREATE TABLE IF NOT EXISTS inspection_issue (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    task_id BIGINT NOT NULL COMMENT '巡检任务ID',
+    record_id BIGINT NOT NULL COMMENT '巡检明细ID',
+    locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    check_item VARCHAR(20) NOT NULL COMMENT '异常检查项: compartment-格口, screen-屏幕, lock-门锁',
+    description TEXT COMMENT '异常描述',
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING' COMMENT '处理状态: PENDING-待处理, PROCESSING-处理中, RESOLVED-已解决',
+    handler VARCHAR(50) COMMENT '处理人',
+    handle_note TEXT COMMENT '处理说明',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    handle_time DATETIME COMMENT '处理时间',
+    INDEX idx_issue_task (task_id),
+    INDEX idx_issue_locker (locker_id),
+    INDEX idx_issue_status (status),
+    FOREIGN KEY (task_id) REFERENCES inspection_task(id) ON DELETE CASCADE,
+    FOREIGN KEY (record_id) REFERENCES inspection_record(id) ON DELETE CASCADE,
+    FOREIGN KEY (locker_id) REFERENCES locker(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='巡检异常待处理记录表';
+
 INSERT INTO building (name, code, sort_order) VALUES
 ('1号楼', 'B001', 1),
 ('2号楼', 'B002', 2),
@@ -92,3 +150,20 @@ INSERT INTO unit (building_id, name, code, sort_order) VALUES
 (2, '1单元', 'U003', 1),
 (2, '2单元', 'U004', 2),
 (3, '1单元', 'U005', 1);
+
+INSERT INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
+SELECT * FROM (SELECT 'KDG-001' AS locker_no, 24 AS compartment_count, 'STANDARD' AS spec_type,
+       1 AS building_id, 1 AS unit_id, '1层' AS floor, '2024-03-01' AS installation_date, 'ACTIVE' AS status) AS t
+WHERE NOT EXISTS (SELECT 1 FROM locker WHERE locker_no = 'KDG-001');
+
+INSERT INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
+SELECT * FROM (SELECT 'KDG-002', 36, 'LARGE', 1, 2, '1层', '2024-03-05', 'ACTIVE') AS t
+WHERE NOT EXISTS (SELECT 1 FROM locker WHERE locker_no = 'KDG-002');
+
+INSERT INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
+SELECT * FROM (SELECT 'KDG-003', 18, 'SMALL', 2, 3, '1层', '2024-04-10', 'ACTIVE') AS t
+WHERE NOT EXISTS (SELECT 1 FROM locker WHERE locker_no = 'KDG-003');
+
+INSERT INTO locker (locker_no, compartment_count, spec_type, building_id, unit_id, floor, installation_date, status)
+SELECT * FROM (SELECT 'KDG-004', 30, 'MIXED', 3, 5, '1层', '2024-05-12', 'ACTIVE') AS t
+WHERE NOT EXISTS (SELECT 1 FROM locker WHERE locker_no = 'KDG-004');
