@@ -284,7 +284,7 @@ public class InspectionService {
     /**
      * 依据本次检查结果同步异常待处理记录：
      * - 新出现的异常项生成待处理记录；
-     * - 上次异常、本次恢复正常的检查项，其仍在「待处理」的记录自动标记已解决；
+     * - 上次异常、本次恢复正常或标记为不适用的检查项，其仍在「待处理」的记录自动标记已解决；
      * - 已在处理中/已解决的记录保留处理痕迹，不被覆盖。
      */
     private void syncIssues(Long taskId, InspectionRecord record,
@@ -319,13 +319,16 @@ public class InspectionService {
                     issue.setStatus(IssueStatus.PENDING);
                     issueRepository.save(issue);
                 }
-            } else if (result == CheckResult.NORMAL) {
-                // 复检恢复正常：自动关闭仍待处理的记录，处理中及已解决的保留
+            } else if (result == CheckResult.NORMAL || result == CheckResult.NOT_APPLICABLE) {
+                // 复检恢复正常或标记不适用：自动关闭仍待处理的记录，处理中及已解决的保留
+                String autoNote = result == CheckResult.NORMAL
+                        ? "复检恢复正常，自动关闭"
+                        : "复检标记为不适用，自动关闭";
                 for (InspectionIssue issue : itemIssues) {
                     if (issue.getStatus() == IssueStatus.PENDING) {
                         issue.setStatus(IssueStatus.RESOLVED);
                         issue.setHandleNote(StringUtils.hasText(issue.getHandleNote())
-                                ? issue.getHandleNote() : "复检恢复正常，自动关闭");
+                                ? issue.getHandleNote() : autoNote);
                         issue.setHandleTime(LocalDateTime.now());
                         issueRepository.save(issue);
                     }
