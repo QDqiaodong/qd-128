@@ -111,6 +111,11 @@ public class InspectionService {
     }
 
     public PageResponse<InspectionTaskDTO> getTasks(Integer page, Integer size, String status,
+                                                    String keyword, Boolean overdue, Boolean abnormal) {
+        return getTasks(page, size, status, keyword, overdue, abnormal, null, null);
+    }
+
+    public PageResponse<InspectionTaskDTO> getTasks(Integer page, Integer size, String status,
                                                     String keyword, Boolean overdue, Boolean abnormal,
                                                     String assignee, Boolean urged) {
         Specification<InspectionTask> spec = buildTaskSpec(status, keyword, overdue, abnormal, assignee, urged);
@@ -471,6 +476,23 @@ public class InspectionService {
     }
 
     // ===================== 转换与辅助 =====================
+
+    private Map<Long, Integer> loadUrgeCounts(List<Long> taskIds) {
+        Map<Long, Integer> counts = new HashMap<>();
+        if (taskIds == null || taskIds.isEmpty()) {
+            return counts;
+        }
+        for (InspectionUrgeRecord record : urgeRepository.findByTaskIdIn(taskIds)) {
+            counts.merge(record.getTaskId(), 1, Integer::sum);
+        }
+        return counts;
+    }
+
+    private InspectionTaskDTO toTaskDTO(InspectionTask task, int urgeCount) {
+        InspectionTaskDTO dto = toTaskDTO(task);
+        dto.setUrgeCount(urgeCount);
+        return dto;
+    }
 
     private InspectionTaskDTO toTaskDTO(InspectionTask task) {
         InspectionTaskDTO dto = new InspectionTaskDTO();
