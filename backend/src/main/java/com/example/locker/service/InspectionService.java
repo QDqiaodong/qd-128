@@ -41,6 +41,12 @@ public class InspectionService {
     @Autowired
     private SpecTemplateService specTemplateService;
 
+    @Autowired
+    private InspectionReassignRecordRepository reassignRepository;
+
+    @Autowired
+    private InspectionUrgeRecordRepository urgeRepository;
+
     // ===================== 任务 =====================
 
     @Transactional
@@ -105,20 +111,25 @@ public class InspectionService {
     }
 
     public PageResponse<InspectionTaskDTO> getTasks(Integer page, Integer size, String status,
-                                                    String keyword, Boolean overdue, Boolean abnormal) {
-        Specification<InspectionTask> spec = buildTaskSpec(status, keyword, overdue, abnormal);
+                                                    String keyword, Boolean overdue, Boolean abnormal,
+                                                    String assignee, Boolean urged) {
+        Specification<InspectionTask> spec = buildTaskSpec(status, keyword, overdue, abnormal, assignee, urged);
         Page<InspectionTask> taskPage = taskRepository.findAll(spec,
                 PageRequest.of(page - 1, size, org.springframework.data.domain.Sort.by(
                         org.springframework.data.domain.Sort.Direction.DESC, "createTime")));
 
-        List<InspectionTaskDTO> list = taskPage.getContent().stream()
-                .map(this::toTaskDTO)
+        List<InspectionTask> tasks = taskPage.getContent();
+        Map<Long, Integer> urgeCountMap = loadUrgeCounts(
+                tasks.stream().map(InspectionTask::getId).collect(Collectors.toList()));
+        List<InspectionTaskDTO> list = tasks.stream()
+                .map(t -> toTaskDTO(t, urgeCountMap.getOrDefault(t.getId(), 0)))
                 .collect(Collectors.toList());
         return new PageResponse<>(list, taskPage.getTotalElements(), page, size);
     }
 
     private Specification<InspectionTask> buildTaskSpec(String status, String keyword,
-                                                        Boolean overdue, Boolean abnormal) {
+                                                        Boolean overdue, Boolean abnormal,
+                                                        String assignee, Boolean urged) {
         return (root, query, cb) -> {
             List<Predicate> predicates = new ArrayList<>();
 
@@ -140,6 +151,11 @@ public class InspectionService {
                         cb.like(root.get("assignee"), like)));
             }
 
+            // 按（当前）负责人精确筛选，转派后以最新负责人为准
+            if (StringUtils.hasText(assignee)) {
+                predicates.add(cb.equal(root.get("assignee"), assignee.trim()));
+            }
+
             if (Boolean.TRUE.equals(abnormal)) {
                 predicates.add(cb.greaterThan(root.get("pendingIssueCount"), 0));
             }
@@ -150,6 +166,16 @@ public class InspectionService {
                         cb.isNotNull(root.get("deadline")),
                         cb.lessThan(root.get("deadline"), LocalDateTime.now()),
                         cb.notEqual(root.get("status"), InspectionTaskStatus.COMPLETED)));
+            }
+
+            if (urged != null) {
+                jakarta.persistence.criteria.Subquery<Long> sub = query.subquery(Long.class);
+                jakarta.persistence.criteria.Root<InspectionUrgeRecord> urgeRoot =
+                        sub.from(InspectionUrgeRecord.class);
+                sub.select(urgeRoot.get("id"))
+                        .where(cb.equal(urgeRoot.get("taskId"), root.get("id")));
+                Predicate exists = cb.exists(sub);
+                predicates.add(urged ? exists : cb.not(exists));
             }
 
             return cb.and(predicates.toArray(new Predicate[0]));
@@ -168,7 +194,9 @@ public class InspectionService {
     @Transactional
     public void deleteTask(Long id) {
         getTaskEntity(id);
-        // 先删异常记录，再删明细，最后删任务，避免外键依赖顺序问题
+        // 先删催办/转派台账与异常记录，再删明细，最后删任务，避免外键依赖顺序问题
+        urgeRepository.deleteAllByTaskId(id);
+        reassignRepository.deleteAllByTaskId(id);
         issueRepository.deleteAllInBatch(issueRepository.findByTaskIdOrderByCreateTimeDesc(id));
         recordRepository.deleteAllInBatch(recordRepository.findByTaskIdOrderByIdAsc(id));
         taskRepository.deleteById(id);

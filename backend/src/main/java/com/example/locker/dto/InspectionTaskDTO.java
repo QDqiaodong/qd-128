@@ -31,6 +31,9 @@ public class InspectionTaskDTO {
     /** 异常记录总数（含已解决） */
     private Integer totalIssueCount;
 
+    /** 催办次数（由催办台账实时统计） */
+    private Integer urgeCount;
+
     private String creator;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
