@@ -239,9 +239,38 @@ class KeyBorrowServiceTest {
         assertEquals(KeyBorrowStatus.ON_LOAN, dto.getStatus());
         assertTrue(dto.getOnLoan(), "改期后仍为借用中，未还条数不减少");
         assertFalse(dto.getReturnOverdue(), "改期到未来后不再逾期");
+        assertFalse(dto.getExtendable(), "改期到未来后未到点，不能再次改期");
         assertEquals(1, dto.getExtendCount());
         assertEquals("维修配件未到，顺延三天", dto.getLastExtendReason());
         assertNotNull(dto.getLastExtendTime());
+        verify(keyBorrowRecordRepository, times(1)).save(any(KeyBorrowRecord.class));
+    }
+
+    @Test
+    void extendRecordAllowsWhenExpectedReturnTimeJustReached() {
+        // 预计归还刚到点（不晚于当前时刻）即放行改期，不再提示「还没到」
+        KeyBorrowRecord record = new KeyBorrowRecord();
+        record.setId(1L);
+        record.setLockerId(1L);
+        record.setStatus(KeyBorrowStatus.ON_LOAN);
+        record.setBorrowTime(LocalDateTime.now().minusHours(2));
+        record.setExpectedReturnTime(LocalDateTime.now());
+        when(keyBorrowRecordRepository.findById(1L)).thenReturn(Optional.of(record));
+        when(keyBorrowRecordRepository.save(any(KeyBorrowRecord.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(lockerRepository.findById(1L)).thenReturn(Optional.of(locker));
+
+        KeyBorrowExtendRequest request = new KeyBorrowExtendRequest();
+        LocalDateTime newExpected = LocalDateTime.now().plusDays(1);
+        request.setExpectedReturnTime(newExpected);
+        request.setExtendReason("配件未到，顺延一天");
+        KeyBorrowRecordDTO dto = keyBorrowService.extendRecord(1L, request);
+
+        assertEquals(newExpected, dto.getExpectedReturnTime());
+        assertEquals(KeyBorrowStatus.ON_LOAN, dto.getStatus());
+        assertTrue(dto.getOnLoan(), "改期不改变借用状态，未还条数不减少");
+        assertEquals(1, dto.getExtendCount());
+        assertEquals("配件未到，顺延一天", dto.getLastExtendReason());
         verify(keyBorrowRecordRepository, times(1)).save(any(KeyBorrowRecord.class));
     }
 

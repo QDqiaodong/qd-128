@@ -129,8 +129,8 @@ public class KeyBorrowService {
     // ===================== 借用改期 =====================
 
     /**
-     * 借用改期：钥匙未还且预计归还已到期（已逾期）时，才允许在原借用单上改一个更晚的预计归还
-     * 并写明改期原因。已归还的单不能改；还没到预计归还时间的单直接拦下、不写任何数据。
+     * 借用改期：钥匙未还且预计归还刚好到点或已过点时，允许在原借用单上改一个更晚的预计归还
+     * 并写明改期原因。已归还的单不能改；还没到预计归还时间（未来时间）的单直接拦下、不写任何数据。
      * 整个改期在单个事务内一次落库，任一校验不通过整体回滚，不会写出半条改期。
      * 改期只更新预计归还时间与改期痕迹，不改变借用状态，因此按柜一览的未还条数不会因改期减少。
      */
@@ -148,8 +148,8 @@ public class KeyBorrowService {
             throw new IllegalArgumentException("该记录已归还，不能改期");
         }
         if (record.getExpectedReturnTime() == null
-                || !record.getExpectedReturnTime().isBefore(LocalDateTime.now())) {
-            // 预计归还尚未到期（含恰好到期）时不允许改期，逾期标记与列表口径保持一致
+                || record.getExpectedReturnTime().isAfter(LocalDateTime.now())) {
+            // 只拦预计归还还没到（未来时间）的单；刚好到点（等于当前时刻）及已过点都放行改期
             throw new IllegalArgumentException("还没到预计归还时间，不能改期");
         }
         if (!request.getExpectedReturnTime().isAfter(record.getExpectedReturnTime())) {
@@ -327,9 +327,14 @@ public class KeyBorrowService {
         dto.setStatusName(record.getStatus() == null ? null : record.getStatus().getDisplayName());
         // 借用中 = 钥匙未归还，列表与详情统一据此标记
         dto.setOnLoan(record.getStatus() == KeyBorrowStatus.ON_LOAN);
+        LocalDateTime now = LocalDateTime.now();
         dto.setReturnOverdue(record.getStatus() == KeyBorrowStatus.ON_LOAN
                 && record.getExpectedReturnTime() != null
-                && record.getExpectedReturnTime().isBefore(LocalDateTime.now()));
+                && record.getExpectedReturnTime().isBefore(now));
+        // 刚好到点或已过点即可改期，与 extendRecord 的拦截口径一致，前端据此置灰/放行改期按钮
+        dto.setExtendable(record.getStatus() == KeyBorrowStatus.ON_LOAN
+                && record.getExpectedReturnTime() != null
+                && !record.getExpectedReturnTime().isAfter(now));
         dto.setReturner(record.getReturner());
         dto.setReturnTime(record.getReturnTime());
         dto.setRemark(record.getRemark());

@@ -30,6 +30,8 @@ public class KeyBorrowRecordDTO {
     private Boolean onLoan;
     /** 借用中且预计归还时间已过 */
     private Boolean returnOverdue;
+    /** 借用中且预计归还刚好到点或已过点：可发起改期（与后端改期校验口径一致） */
+    private Boolean extendable;
     private String returner;
     private LocalDateTime returnTime;
     private String remark;

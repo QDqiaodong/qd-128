@@ -258,8 +258,8 @@ const extendForm = ref<{ expectedReturnTime: string | null; extendReason: string
 })
 
 const openExtendDialog = (record: KeyBorrowRecord) => {
-  // 还没到预计归还时间不能改期，前端先拦下；最终以后端校验为准
-  if (!record.returnOverdue) {
+  // 还没到预计归还时间不能改期，刚好到点或已过点放行；前端先拦下，最终以后端校验为准
+  if (!record.extendable) {
     ElMessage.warning('还没到预计归还时间，不能改期')
     return
   }
@@ -294,7 +294,7 @@ const handleExtendDialogClose = (done: () => void) => {
 const submitExtend = async () => {
   const record = extendTarget.value
   if (!record) return
-  if (!record.returnOverdue) {
+  if (!record.extendable) {
     ElMessage.warning('还没到预计归还时间，不能改期')
     return
   }
@@ -423,7 +423,7 @@ onMounted(() => {
           <template #default="{ row }">
             <template v-if="row.onLoan">
               <el-tooltip
-                v-if="!row.returnOverdue"
+                v-if="!row.extendable"
                 content="还没到预计归还时间，不能改期"
                 placement="top"
               >
@@ -618,7 +618,7 @@ onMounted(() => {
     >
       <template v-if="extendTarget">
         <el-alert type="warning" :closable="false" class="dialog-tip">
-          仅借用中且预计归还已逾期的记录可改期；已归还的单、还没到预计归还时间的单不能改。
+          仅借用中且预计归还刚好到点或已过点的记录可改期；已归还的单、还没到预计归还时间的单不能改。
           改期后柜体仍标记「借用中」，未还条数不变。
         </el-alert>
         <el-descriptions :column="2" border class="dialog-tip">
