@@ -129,10 +129,10 @@ public class KeyBorrowService {
     // ===================== 借用改期 =====================
 
     /**
-     * 借用改期：钥匙未还且预计归还已到时，在原借用单上改一个更晚的预计归还并写明改期原因。
-     * 已归还的单不能改；整个改期在单个事务内一次落库，任一校验不通过整体回滚，
-     * 不会写出半条改期。改期只更新预计归还时间与改期痕迹，不改变借用状态，
-     * 因此按柜一览的未还条数不会因改期减少。
+     * 借用改期：钥匙未还且预计归还已到期（已逾期）时，才允许在原借用单上改一个更晚的预计归还
+     * 并写明改期原因。已归还的单不能改；还没到预计归还时间的单直接拦下、不写任何数据。
+     * 整个改期在单个事务内一次落库，任一校验不通过整体回滚，不会写出半条改期。
+     * 改期只更新预计归还时间与改期痕迹，不改变借用状态，因此按柜一览的未还条数不会因改期减少。
      */
     @Transactional
     public KeyBorrowRecordDTO extendRecord(Long id, KeyBorrowExtendRequest request) {
@@ -147,8 +147,12 @@ public class KeyBorrowService {
         if (record.getStatus() == KeyBorrowStatus.RETURNED) {
             throw new IllegalArgumentException("该记录已归还，不能改期");
         }
-        if (record.getExpectedReturnTime() != null
-                && !request.getExpectedReturnTime().isAfter(record.getExpectedReturnTime())) {
+        if (record.getExpectedReturnTime() == null
+                || !record.getExpectedReturnTime().isBefore(LocalDateTime.now())) {
+            // 预计归还尚未到期（含恰好到期）时不允许改期，逾期标记与列表口径保持一致
+            throw new IllegalArgumentException("还没到预计归还时间，不能改期");
+        }
+        if (!request.getExpectedReturnTime().isAfter(record.getExpectedReturnTime())) {
             throw new IllegalArgumentException("新的预计归还时间必须晚于原预计归还时间");
         }
 

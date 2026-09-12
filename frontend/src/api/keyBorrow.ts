@@ -79,7 +79,7 @@ export interface KeyBorrowCreateRequest {
 }
 
 export interface KeyBorrowExtendRequest {
-  /** 新的预计归还时间，必须晚于原预计归还时间 */
+  /** 新的预计归还时间，必须晚于原预计归还时间（仅预计归还已逾期时允许提交） */
   expectedReturnTime: string
   /** 改期原因（必填） */
   extendReason: string
@@ -124,7 +124,7 @@ export const keyBorrowApi = {
     return api.post<KeyBorrowRecord>(`/key-borrows/${id}/return`, { returner, returnTime: returnTime || undefined })
   },
 
-  /** 借用改期：仅借用中可改，新的预计归还必须更晚，改期原因必填 */
+  /** 借用改期：仅借用中且预计归还已逾期可改，新预计归还必须更晚，改期原因必填 */
   extendRecord(id: number, data: KeyBorrowExtendRequest) {
     return api.post<KeyBorrowRecord>(`/key-borrows/${id}/extend`, data)
   },

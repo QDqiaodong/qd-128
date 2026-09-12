@@ -48,7 +48,7 @@ public class KeyBorrowController {
         return ResponseEntity.ok(keyBorrowService.returnRecord(id, request));
     }
 
-    /** 借用改期：仅借用中可改，新的预计归还必须更晚，改期原因必填；已归还的单不能改 */
+    /** 借用改期：仅借用中且预计归还已逾期可改，新预计归还必须更晚，改期原因必填；已归还、未到期的单不能改 */
     @PostMapping("/{id}/extend")
     public ResponseEntity<KeyBorrowRecordDTO> extendRecord(
             @PathVariable Long id,

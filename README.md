@@ -152,8 +152,8 @@ Docker Compose 使用固定端口并绑定 `127.0.0.1`；前后端 Dockerfile �
 
 ### 借用改期
 
-- 钥匙未还、预计归还已到时，可在原借用单上**改一个更晚的预计归还时间**，并必须写明**改期原因**；系统在原单上累计改期次数、留存最近一次改期原因与改期时间。
-- 新的预计归还时间必须晚于原预计归还时间；**已归还的单不能改期**。
+- 钥匙未还、**预计归还已到期（已逾期）时**，才可在原借用单上**改一个更晚的预计归还时间**，并必须写明**改期原因**；系统在原单上累计改期次数、留存最近一次改期原因与改期时间。
+- 新的预计归还时间必须晚于原预计归还时间；**已归还的单不能改期**，**还没到预计归还时间的单会被拦下并提示「还没到预计归还时间，不能改期」**（列表中该单的「改期」按钮置灰，悬停可见同样提示）。
 - 整个改期在单个事务内一次落库，任一校验不通过整体回滚；改期窗口未提交前关闭仅丢弃草稿，**不会留下半条改期**。
 - 改期只更新预计归还时间与改期痕迹，不改变借用状态：刷新后台账列表的预计归还、是否逾期与柜体「借用中」标记保持一致，按柜一览的未还条数不会因改期减少。
 
@@ -169,7 +169,7 @@ Docker Compose 使用固定端口并绑定 `127.0.0.1`；前后端 Dockerfile �
 - `GET  /api/key-borrows?status=&lockerId=&keyword=`：分页台账列表，`status=ON_LOAN/RETURNED`
 - `GET  /api/key-borrows/{id}`：台账详情
 - `POST /api/key-borrows/{id}/return`：归还登记，body 为 `{ returner, returnTime? }`，归还人必填
-- `POST /api/key-borrows/{id}/extend`：借用改期，body 为 `{ expectedReturnTime, extendReason }`，仅借用中可改，新预计归还必须更晚，改期原因必填
+- `POST /api/key-borrows/{id}/extend`：借用改期，body 为 `{ expectedReturnTime, extendReason }`，仅借用中且预计归还已逾期可改，新预计归还必须更晚，改期原因必填；未到期改期返回 400「还没到预计归还时间，不能改期」
 - `GET  /api/key-borrows/locker/{lockerId}`：某台柜体的全部借用记录
 - `GET  /api/key-borrows/locker-overview`：按柜钥匙状态一览（含未还条数）
 - `GET  /api/key-borrows/locker-options`：登记可选柜体（含永久停用柜）

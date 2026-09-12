@@ -283,16 +283,40 @@ class KeyBorrowServiceTest {
     }
 
     @Test
-    void extendRecordRejectsNotLaterExpectedReturnTime() {
-        // 只能改一个更晚的预计归还
+    void extendRecordRejectsBeforeExpectedReturnTime() {
+        // 预计归还尚未到期（借用中、未逾期）时不能改期：直接拦下且原预计归还保持不变，不落库
+        LocalDateTime originalExpected = LocalDateTime.now().plusHours(5);
         KeyBorrowRecord record = new KeyBorrowRecord();
         record.setId(1L);
         record.setStatus(KeyBorrowStatus.ON_LOAN);
-        record.setExpectedReturnTime(LocalDateTime.now().plusHours(5));
+        record.setBorrowTime(LocalDateTime.now().minusHours(2));
+        record.setExpectedReturnTime(originalExpected);
+        when(keyBorrowRecordRepository.findById(1L)).thenReturn(Optional.of(record));
+
+        KeyBorrowExtendRequest request = new KeyBorrowExtendRequest();
+        request.setExpectedReturnTime(LocalDateTime.now().plusDays(1));
+        request.setExtendReason("还没到期就想延后");
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> keyBorrowService.extendRecord(1L, request));
+        assertTrue(ex.getMessage().contains("还没到预计归还"), "应提示还没到预计归还不能改");
+        assertEquals(originalExpected, record.getExpectedReturnTime(), "被拦下后原预计归还保持不变");
+        assertNull(record.getLastExtendReason(), "被拦下后不写改期原因");
+        assertEquals(0, record.getExtendCount(), "被拦下后不累计改期次数");
+        verify(keyBorrowRecordRepository, never()).save(any(KeyBorrowRecord.class));
+    }
+
+    @Test
+    void extendRecordRejectsNotLaterExpectedReturnTime() {
+        // 已逾期的单也只能改一个更晚的预计归还
+        KeyBorrowRecord record = new KeyBorrowRecord();
+        record.setId(1L);
+        record.setStatus(KeyBorrowStatus.ON_LOAN);
+        record.setExpectedReturnTime(LocalDateTime.now().minusHours(5));
         when(keyBorrowRecordRepository.findById(1L)).thenReturn(Optional.of(record));
 
         KeyBorrowExtendRequest earlier = new KeyBorrowExtendRequest();
-        earlier.setExpectedReturnTime(LocalDateTime.now().plusHours(1));
+        earlier.setExpectedReturnTime(LocalDateTime.now().minusHours(6));
         earlier.setExtendReason("提前");
         assertThrows(IllegalArgumentException.class,
                 () -> keyBorrowService.extendRecord(1L, earlier));

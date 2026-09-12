@@ -258,6 +258,11 @@ const extendForm = ref<{ expectedReturnTime: string | null; extendReason: string
 })
 
 const openExtendDialog = (record: KeyBorrowRecord) => {
+  // 还没到预计归还时间不能改期，前端先拦下；最终以后端校验为准
+  if (!record.returnOverdue) {
+    ElMessage.warning('还没到预计归还时间，不能改期')
+    return
+  }
   extendTarget.value = record
   extendForm.value = { expectedReturnTime: null, extendReason: '' }
   extendDialogVisible.value = true
@@ -289,6 +294,10 @@ const handleExtendDialogClose = (done: () => void) => {
 const submitExtend = async () => {
   const record = extendTarget.value
   if (!record) return
+  if (!record.returnOverdue) {
+    ElMessage.warning('还没到预计归还时间，不能改期')
+    return
+  }
   const f = extendForm.value
   if (!f.expectedReturnTime) {
     ElMessage.warning('请选择新的预计归还时间')
@@ -413,7 +422,22 @@ onMounted(() => {
         <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
             <template v-if="row.onLoan">
+              <el-tooltip
+                v-if="!row.returnOverdue"
+                content="还没到预计归还时间，不能改期"
+                placement="top"
+              >
+                <span class="extend-btn-wrap">
+                  <el-button
+                    size="small"
+                    type="primary"
+                    plain
+                    disabled
+                  >改期</el-button>
+                </span>
+              </el-tooltip>
               <el-button
+                v-else
                 size="small"
                 type="primary"
                 plain
@@ -594,7 +618,8 @@ onMounted(() => {
     >
       <template v-if="extendTarget">
         <el-alert type="warning" :closable="false" class="dialog-tip">
-          仅借用中的记录可改期，已归还的单不能改；改期后柜体仍标记「借用中」，未还条数不变。
+          仅借用中且预计归还已逾期的记录可改期；已归还的单、还没到预计归还时间的单不能改。
+          改期后柜体仍标记「借用中」，未还条数不变。
         </el-alert>
         <el-descriptions :column="2" border class="dialog-tip">
           <el-descriptions-item label="台账编号">{{ extendTarget.recordNo }}</el-descriptions-item>
@@ -701,6 +726,10 @@ onMounted(() => {
   float: right;
   display: flex;
   gap: 4px;
+}
+
+.extend-btn-wrap {
+  display: inline-block;
 }
 
 .empty-tip {
