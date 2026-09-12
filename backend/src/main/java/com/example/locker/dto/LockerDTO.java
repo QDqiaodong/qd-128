@@ -35,6 +35,10 @@ public class LockerDTO {
     private Integer openClearanceCount;
     /** 办理中清柜单的滞留件数合计 */
     private Integer overduePackageCount;
+    /** 是否有借用中的钥匙借用记录（借用中标记，由借用台账实时推导，刷新后保持一致） */
+    private Boolean keyBorrowed;
+    /** 未还借用条数（借用中记录数） */
+    private Integer openKeyBorrowCount;
     private String remark;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

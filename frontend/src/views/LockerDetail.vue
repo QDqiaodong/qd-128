@@ -3,8 +3,10 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { lockerApi, buildingApi, STATUS_NAME_MAP } from '@/api/locker'
 import { clearanceApi } from '@/api/clearance'
+import { keyBorrowApi } from '@/api/keyBorrow'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ClearanceOrder } from '@/api/clearance'
+import type { KeyBorrowRecord } from '@/api/keyBorrow'
 import type {
   LockerDTO,
   AdjustmentRecord,
@@ -23,6 +25,7 @@ const locker = ref<LockerDTO | null>(null)
 const adjustmentRecords = ref<AdjustmentRecord[]>([])
 const statusRecords = ref<StatusChangeRecord[]>([])
 const clearanceOrders = ref<ClearanceOrder[]>([])
+const keyBorrowRecords = ref<KeyBorrowRecord[]>([])
 const buildingTree = ref<BuildingTreeDTO[]>([])
 const units = ref<UnitDTO[]>([])
 
@@ -119,18 +122,20 @@ onMounted(async () => {
 
 const fetchData = async () => {
   try {
-    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes] = await Promise.all([
+    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes] = await Promise.all([
       lockerApi.getLockerById(lockerId.value),
       lockerApi.getAdjustmentRecords(lockerId.value),
       lockerApi.getStatusChangeRecords(lockerId.value),
       buildingApi.getBuildingTree(),
-      clearanceApi.getLockerOrders(lockerId.value)
+      clearanceApi.getLockerOrders(lockerId.value),
+      keyBorrowApi.getLockerRecords(lockerId.value)
     ])
     locker.value = lockerRes.data
     adjustmentRecords.value = recordsRes.data
     statusRecords.value = statusRes.data
     buildingTree.value = treeRes.data
     clearanceOrders.value = clearanceRes.data
+    keyBorrowRecords.value = keyBorrowRes.data
   } catch (error) {
     console.error('获取数据失败', error)
   }
@@ -212,6 +217,9 @@ const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
           <el-tag :type="statusTagType(locker.status)">{{ statusLabel(locker.status) }}</el-tag>
           <el-tag v-if="locker.overdue" type="danger" style="margin-left: 8px">
             滞留中（{{ locker.overduePackageCount }} 件）
+          </el-tag>
+          <el-tag v-if="locker.keyBorrowed" type="warning" style="margin-left: 8px">
+            钥匙借用中
           </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="创建时间">
@@ -310,6 +318,39 @@ const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
         </el-table-column>
       </el-table>
       <div v-else class="empty-tip">暂无滞留清柜记录</div>
+    </el-card>
+
+    <el-card style="margin-top: 20px;">
+      <template #header>
+        <div class="card-header">
+          <span>钥匙借用记录</span>
+          <el-tag v-if="locker?.keyBorrowed" type="warning" size="small">借用中</el-tag>
+        </div>
+      </template>
+      <el-table :data="keyBorrowRecords" border v-if="keyBorrowRecords.length > 0">
+        <el-table-column prop="recordNo" label="台账编号" width="190" />
+        <el-table-column prop="borrower" label="借出人" width="100" />
+        <el-table-column prop="reason" label="借用事由" min-width="140" show-overflow-tooltip />
+        <el-table-column label="借出时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.borrowTime) }}</template>
+        </el-table-column>
+        <el-table-column label="预计归还" width="160">
+          <template #default="{ row }">{{ formatTime(row.expectedReturnTime) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.onLoan" type="warning">借用中</el-tag>
+            <el-tag v-else type="success">已归还</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="returner" label="归还人" width="100">
+          <template #default="{ row }">{{ row.returner || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="归还时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.returnTime) }}</template>
+        </el-table-column>
+      </el-table>
+      <div v-else class="empty-tip">暂无钥匙借用记录</div>
     </el-card>
 
     <el-card style="margin-top: 20px;">

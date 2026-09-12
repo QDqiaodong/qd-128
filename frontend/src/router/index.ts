@@ -10,6 +10,7 @@ import InspectionList from '@/views/InspectionList.vue'
 import InspectionCreate from '@/views/InspectionCreate.vue'
 import InspectionDetail from '@/views/InspectionDetail.vue'
 import ClearanceList from '@/views/ClearanceList.vue'
+import KeyBorrowList from '@/views/KeyBorrowList.vue'
 
 const routes = [
   { path: '/', name: 'Dashboard', component: Dashboard },
@@ -23,7 +24,8 @@ const routes = [
   { path: '/inspections', name: 'InspectionList', component: InspectionList },
   { path: '/inspections/create', name: 'InspectionCreate', component: InspectionCreate },
   { path: '/inspections/:id', name: 'InspectionDetail', component: InspectionDetail },
-  { path: '/clearances', name: 'ClearanceList', component: ClearanceList }
+  { path: '/clearances', name: 'ClearanceList', component: ClearanceList },
+  { path: '/key-borrows', name: 'KeyBorrowList', component: KeyBorrowList }
 ]
 
 const router = createRouter({

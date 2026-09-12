@@ -133,3 +133,36 @@ Docker Compose 使用固定端口并绑定 `127.0.0.1`；前后端 Dockerfile �
 - `GET  /api/inspections/{id}/issues?status=`：异常待处理记录，可按 `PENDING/PROCESSING/RESOLVED` 筛选
 - `PUT  /api/inspections/issues/{issueId}`：更新异常处理状态，body 为 `{ status, handler?, handleNote? }`
 - `GET  /api/inspections/cycles` / `GET  /api/inspections/task-statuses`：周期、任务状态字典
+
+## 钥匙借用台账模块
+
+「钥匙借用台账」页面（`/key-borrows`）供物业登记快递柜柜门钥匙的临时借用与归还。
+
+### 借出登记
+
+- 登记时必须填写**借出人**、**借用事由**、**借出时间**和**预计归还时间**；借出时间不能晚于当前时间，预计归还时间不能早于借出时间。
+- **同一柜钥匙未还清前不能再借出**：该柜存在「借用中」记录时，登记下拉框中对应柜体置灰，后端也会再次拦截。
+- 整个登记在单个事务内一次落库，任一校验不通过整体回滚，**取消登记不会写出半条台账**；前端登记窗口未提交前关闭仅丢弃草稿，不产生任何数据。
+- 永久停用柜、临时停用柜同样可选，用于**补登历史借用**（借出时间可选过去时间）。
+
+### 归还登记
+
+- 归还必须填写**归还人**；**归还时间**默认当前时间，补登历史归还时可指定过去时间，但不能早于借出时间、不能晚于当前时间。
+- 已归还的记录不能重复归还。
+
+### 标记与一致性
+
+- 借用中的柜体在「快递柜列表」「快递柜详情」均显示「借用中」标记，详情页另设「钥匙借用记录」卡片留存该柜全部借用历史。
+- 借用标记、未还条数全部以 `key_borrow_record` 表为唯一数据源实时推导，**刷新页面后台账列表、按柜一览与柜体展示保持一致**。
+- 「按柜钥匙状态」一览列出全部柜体（含停用柜），借用中的柜体置顶，并汇总当前未还总条数；借用中且预计归还时间已过的记录标记「逾期未还」。
+
+相关接口（前缀 `/api/key-borrows`）：
+
+- `POST /api/key-borrows`：登记借用，body 为 `{ lockerId, borrower, reason, borrowTime, expectedReturnTime, remark? }`
+- `GET  /api/key-borrows?status=&lockerId=&keyword=`：分页台账列表，`status=ON_LOAN/RETURNED`
+- `GET  /api/key-borrows/{id}`：台账详情
+- `POST /api/key-borrows/{id}/return`：归还登记，body 为 `{ returner, returnTime? }`，归还人必填
+- `GET  /api/key-borrows/locker/{lockerId}`：某台柜体的全部借用记录
+- `GET  /api/key-borrows/locker-overview`：按柜钥匙状态一览（含未还条数）
+- `GET  /api/key-borrows/locker-options`：登记可选柜体（含永久停用柜）
+- `GET  /api/key-borrows/statuses`：借用状态字典

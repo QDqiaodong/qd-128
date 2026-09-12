@@ -32,6 +32,10 @@ export interface LockerDTO {
   openClearanceCount?: number
   /** 办理中清柜单的滞留件数合计 */
   overduePackageCount?: number
+  /** 是否有借用中的钥匙借用记录（借用中标记） */
+  keyBorrowed?: boolean
+  /** 未还借用条数（借用中记录数） */
+  openKeyBorrowCount?: number
   remark: string
   createTime: string
   updateTime: string

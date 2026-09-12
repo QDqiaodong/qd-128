@@ -158,6 +158,25 @@ CREATE TABLE IF NOT EXISTS clearance_order (
     FOREIGN KEY (locker_id) REFERENCES locker(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='滞留件清柜单表';
 
+CREATE TABLE IF NOT EXISTS key_borrow_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    record_no VARCHAR(40) NOT NULL UNIQUE COMMENT '借用台账编号',
+    locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    borrower VARCHAR(50) NOT NULL COMMENT '借出人',
+    reason VARCHAR(500) NOT NULL COMMENT '借用事由',
+    borrow_time DATETIME NOT NULL COMMENT '借出时间',
+    expected_return_time DATETIME NOT NULL COMMENT '预计归还时间',
+    status VARCHAR(20) NOT NULL DEFAULT 'ON_LOAN' COMMENT '借用状态: ON_LOAN-借用中, RETURNED-已归还',
+    returner VARCHAR(50) COMMENT '归还人(归还必填)',
+    return_time DATETIME COMMENT '归还时间(归还必填)',
+    remark TEXT COMMENT '备注',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_key_borrow_locker (locker_id),
+    INDEX idx_key_borrow_status (status),
+    FOREIGN KEY (locker_id) REFERENCES locker(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜柜门钥匙借用台账表';
+
 -- ===================== 种子数据（幂等，可重复执行） =====================
 -- 说明：docker-entrypoint-initdb.d 只在空数据卷首次初始化时执行本脚本；
 -- 若数据卷中已有楼栋/单元（旧版本初始化、初始化中断后重启等），
@@ -224,3 +243,16 @@ SELECT 'QG20260820001', l.id, 'B12', 1, '2026-08-20 15:00:00', '李管家', 'COM
 FROM locker l
 WHERE l.locker_no = 'KDG-003'
   AND NOT EXISTS (SELECT 1 FROM clearance_order c WHERE c.order_no = 'QG20260820001');
+
+-- 钥匙借用台账：按编号幂等补种；KDG-002 借用中（列表/详情显示借用中），KDG-004 已归还的历史记录
+INSERT INTO key_borrow_record (record_no, locker_id, borrower, reason, borrow_time, expected_return_time, status, remark)
+SELECT 'JY20260910001', l.id, '王维修', '柜门卡滞检修，取钥匙开柜排查', '2026-09-10 09:00:00', '2026-09-13 18:00:00', 'ON_LOAN', '维修期间钥匙由维修队保管'
+FROM locker l
+WHERE l.locker_no = 'KDG-002'
+  AND NOT EXISTS (SELECT 1 FROM key_borrow_record k WHERE k.record_no = 'JY20260910001');
+
+INSERT INTO key_borrow_record (record_no, locker_id, borrower, reason, borrow_time, expected_return_time, status, returner, return_time)
+SELECT 'JY20260805001', l.id, '赵快递员', '批量投件临时借用柜门钥匙', '2026-08-05 14:00:00', '2026-08-05 18:00:00', 'RETURNED', '赵快递员', '2026-08-05 17:30:00'
+FROM locker l
+WHERE l.locker_no = 'KDG-004'
+  AND NOT EXISTS (SELECT 1 FROM key_borrow_record k WHERE k.record_no = 'JY20260805001');

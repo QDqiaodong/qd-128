@@ -3,13 +3,16 @@ package com.example.locker.service;
 import com.example.locker.dto.*;
 import com.example.locker.entity.AdjustmentRecord;
 import com.example.locker.entity.ClearanceOrder;
+import com.example.locker.entity.KeyBorrowRecord;
 import com.example.locker.entity.Locker;
 import com.example.locker.entity.StatusChangeRecord;
 import com.example.locker.enums.ClearanceStatus;
+import com.example.locker.enums.KeyBorrowStatus;
 import com.example.locker.enums.LockerStatus;
 import com.example.locker.repository.AdjustmentRecordRepository;
 import com.example.locker.repository.BuildingRepository;
 import com.example.locker.repository.ClearanceOrderRepository;
+import com.example.locker.repository.KeyBorrowRecordRepository;
 import com.example.locker.repository.LockerRepository;
 import com.example.locker.repository.StatusChangeRecordRepository;
 import com.example.locker.repository.UnitRepository;
@@ -53,6 +56,9 @@ public class LockerService {
 
     @Autowired
     private ClearanceOrderRepository clearanceOrderRepository;
+
+    @Autowired
+    private KeyBorrowRecordRepository keyBorrowRecordRepository;
 
     @Autowired
     private SpecTemplateService specTemplateService;
@@ -108,6 +114,7 @@ public class LockerService {
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
         fillClearanceInfo(dtoList);
+        fillKeyBorrowInfo(dtoList);
         return new PageResponse<>(dtoList, lockerPage.getTotalElements(), page, size);
     }
 
@@ -116,6 +123,7 @@ public class LockerService {
                 new RuntimeException("快递柜不存在: " + id));
         LockerDTO dto = convertToDTO(locker);
         fillClearanceInfo(java.util.Collections.singletonList(dto));
+        fillKeyBorrowInfo(java.util.Collections.singletonList(dto));
         return dto;
     }
 
@@ -138,6 +146,26 @@ public class LockerService {
             dto.setOpenClearanceCount(open.size());
             dto.setOverduePackageCount(open.stream()
                     .mapToInt(o -> o.getPackageCount() == null ? 0 : o.getPackageCount()).sum());
+        }
+    }
+
+    /**
+     * 钥匙借用标记与未还条数实时由借用中的台账记录推导，
+     * 借用台账是唯一数据源，保证刷新后柜体标记与台账状态一致。
+     */
+    private void fillKeyBorrowInfo(List<LockerDTO> dtos) {
+        if (dtos == null || dtos.isEmpty()) {
+            return;
+        }
+        List<Long> lockerIds = dtos.stream().map(LockerDTO::getId).collect(Collectors.toList());
+        Map<Long, List<KeyBorrowRecord>> openByLocker = keyBorrowRecordRepository
+                .findByLockerIdInAndStatus(lockerIds, KeyBorrowStatus.ON_LOAN).stream()
+                .collect(Collectors.groupingBy(KeyBorrowRecord::getLockerId));
+        for (LockerDTO dto : dtos) {
+            List<KeyBorrowRecord> open = openByLocker.getOrDefault(dto.getId(),
+                    java.util.Collections.emptyList());
+            dto.setKeyBorrowed(!open.isEmpty());
+            dto.setOpenKeyBorrowCount(open.size());
         }
     }
 
