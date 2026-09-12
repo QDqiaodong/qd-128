@@ -180,6 +180,28 @@ CREATE TABLE IF NOT EXISTS key_borrow_record (
     FOREIGN KEY (locker_id) REFERENCES locker(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜柜门钥匙借用台账表';
 
+CREATE TABLE IF NOT EXISTS meter_reading_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    record_no VARCHAR(40) NOT NULL UNIQUE COMMENT '抄表单号',
+    locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    period_month VARCHAR(7) NOT NULL COMMENT '账期(自然月, 格式yyyy-MM), 由抄表时间推导',
+    reading_value DECIMAL(12,2) NOT NULL COMMENT '电表读数(kWh)',
+    reader VARCHAR(50) NOT NULL COMMENT '抄表人',
+    reading_time DATETIME NOT NULL COMMENT '抄表时间',
+    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE' COMMENT '单据状态: ACTIVE-有效, VOIDED-已作废',
+    void_reason VARCHAR(500) COMMENT '作废原因(作废必填)',
+    void_operator VARCHAR(50) COMMENT '作废人',
+    void_time DATETIME COMMENT '作废时间',
+    remark TEXT COMMENT '备注',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_meter_reading_locker (locker_id),
+    INDEX idx_meter_reading_period (period_month),
+    INDEX idx_meter_reading_status (status),
+    FOREIGN KEY (locker_id) REFERENCES locker(id)
+    -- 同一柜同一自然月只允许一张未作废(有效)抄表单，由后端在登记事务内校验拦截
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜电表抄表单表';
+
 -- ===================== 种子数据（幂等，可重复执行） =====================
 -- 说明：docker-entrypoint-initdb.d 只在空数据卷首次初始化时执行本脚本；
 -- 若数据卷中已有楼栋/单元（旧版本初始化、初始化中断后重启等），
@@ -259,3 +281,30 @@ SELECT 'JY20260805001', l.id, '赵快递员', '批量投件临时借用柜门钥
 FROM locker l
 WHERE l.locker_no = 'KDG-004'
   AND NOT EXISTS (SELECT 1 FROM key_borrow_record k WHERE k.record_no = 'JY20260805001');
+
+-- 电表抄表单：按单号幂等补种
+-- KDG-001 本月(2026-09)已抄；KDG-002 本月已抄且留有一张已作废单（作废原因留存，作废后可重新登记）；
+-- KDG-003 仅上月(2026-08)历史单，本月未抄；KDG-004 无记录，本月未抄
+INSERT INTO meter_reading_record (record_no, locker_id, period_month, reading_value, reader, reading_time, status, remark)
+SELECT 'CB20260905001', l.id, '2026-09', 1280.50, '李抄表', '2026-09-05 10:00:00', 'ACTIVE', '月度例行抄表'
+FROM locker l
+WHERE l.locker_no = 'KDG-001'
+  AND NOT EXISTS (SELECT 1 FROM meter_reading_record m WHERE m.record_no = 'CB20260905001');
+
+INSERT INTO meter_reading_record (record_no, locker_id, period_month, reading_value, reader, reading_time, status, void_reason, void_operator, void_time)
+SELECT 'CB20260903001', l.id, '2026-09', 986.00, '王抄表', '2026-09-03 09:30:00', 'VOIDED', '读数录入错误，与实际表码不符', '系统管理员', '2026-09-03 15:20:00'
+FROM locker l
+WHERE l.locker_no = 'KDG-002'
+  AND NOT EXISTS (SELECT 1 FROM meter_reading_record m WHERE m.record_no = 'CB20260903001');
+
+INSERT INTO meter_reading_record (record_no, locker_id, period_month, reading_value, reader, reading_time, status, remark)
+SELECT 'CB20260904001', l.id, '2026-09', 986.00, '王抄表', '2026-09-04 09:00:00', 'ACTIVE', '作废错单后重新登记'
+FROM locker l
+WHERE l.locker_no = 'KDG-002'
+  AND NOT EXISTS (SELECT 1 FROM meter_reading_record m WHERE m.record_no = 'CB20260904001');
+
+INSERT INTO meter_reading_record (record_no, locker_id, period_month, reading_value, reader, reading_time, status, remark)
+SELECT 'CB20260806001', l.id, '2026-08', 745.20, '李抄表', '2026-08-06 10:30:00', 'ACTIVE', '上月例行抄表'
+FROM locker l
+WHERE l.locker_no = 'KDG-003'
+  AND NOT EXISTS (SELECT 1 FROM meter_reading_record m WHERE m.record_no = 'CB20260806001');

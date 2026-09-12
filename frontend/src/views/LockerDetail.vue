@@ -4,9 +4,11 @@ import { useRouter, useRoute } from 'vue-router'
 import { lockerApi, buildingApi, STATUS_NAME_MAP } from '@/api/locker'
 import { clearanceApi } from '@/api/clearance'
 import { keyBorrowApi } from '@/api/keyBorrow'
+import { meterReadingApi } from '@/api/meterReading'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ClearanceOrder } from '@/api/clearance'
 import type { KeyBorrowRecord } from '@/api/keyBorrow'
+import type { MeterReadingRecord } from '@/api/meterReading'
 import type {
   LockerDTO,
   AdjustmentRecord,
@@ -26,6 +28,7 @@ const adjustmentRecords = ref<AdjustmentRecord[]>([])
 const statusRecords = ref<StatusChangeRecord[]>([])
 const clearanceOrders = ref<ClearanceOrder[]>([])
 const keyBorrowRecords = ref<KeyBorrowRecord[]>([])
+const meterReadings = ref<MeterReadingRecord[]>([])
 const buildingTree = ref<BuildingTreeDTO[]>([])
 const units = ref<UnitDTO[]>([])
 
@@ -122,13 +125,14 @@ onMounted(async () => {
 
 const fetchData = async () => {
   try {
-    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes] = await Promise.all([
+    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes, meterReadingRes] = await Promise.all([
       lockerApi.getLockerById(lockerId.value),
       lockerApi.getAdjustmentRecords(lockerId.value),
       lockerApi.getStatusChangeRecords(lockerId.value),
       buildingApi.getBuildingTree(),
       clearanceApi.getLockerOrders(lockerId.value),
-      keyBorrowApi.getLockerRecords(lockerId.value)
+      keyBorrowApi.getLockerRecords(lockerId.value),
+      meterReadingApi.getLockerRecords(lockerId.value)
     ])
     locker.value = lockerRes.data
     adjustmentRecords.value = recordsRes.data
@@ -136,6 +140,7 @@ const fetchData = async () => {
     buildingTree.value = treeRes.data
     clearanceOrders.value = clearanceRes.data
     keyBorrowRecords.value = keyBorrowRes.data
+    meterReadings.value = meterReadingRes.data
   } catch (error) {
     console.error('获取数据失败', error)
   }
@@ -181,6 +186,14 @@ const handleBack = () => {
 }
 
 const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
+
+/**
+ * 本月有效抄表单（柜体页读数）：与抄表单列表、本月已抄台数同源，
+ * 均由有效抄表单实时推导，刷新后保持一致
+ */
+const currentMonthReading = computed(() =>
+  meterReadings.value.find((r) => r.currentMonth && r.active) || null
+)
 </script>
 
 <template>
@@ -221,6 +234,21 @@ const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
           <el-tag v-if="locker.keyBorrowed" type="warning" style="margin-left: 8px">
             钥匙借用中
           </el-tag>
+          <el-tag v-if="locker.meterReadThisMonth" type="success" style="margin-left: 8px">
+            本月已抄
+          </el-tag>
+          <el-tag v-else type="info" style="margin-left: 8px">
+            本月未抄
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="本月电表读数" :span="2">
+          <template v-if="currentMonthReading">
+            {{ currentMonthReading.readingValue }} kWh
+            <span class="reading-meta">
+              （{{ currentMonthReading.reader }} 抄于 {{ formatTime(currentMonthReading.readingTime) }}）
+            </span>
+          </template>
+          <span v-else>本月未抄</span>
         </el-descriptions-item>
         <el-descriptions-item label="创建时间">
           {{ formatTime(locker.createTime) }}
@@ -363,6 +391,46 @@ const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
     </el-card>
 
     <el-card style="margin-top: 20px;">
+      <template #header>
+        <div class="card-header">
+          <span>电表抄表记录</span>
+          <el-tag v-if="locker?.meterReadThisMonth" type="success" size="small">本月已抄</el-tag>
+          <el-tag v-else type="info" size="small">本月未抄</el-tag>
+        </div>
+      </template>
+      <el-table :data="meterReadings" border v-if="meterReadings.length > 0">
+        <el-table-column prop="recordNo" label="抄表单号" width="190" />
+        <el-table-column prop="periodMonth" label="账期" width="90" align="center" />
+        <el-table-column label="电表读数" width="110" align="right">
+          <template #default="{ row }">{{ row.readingValue }} kWh</template>
+        </el-table-column>
+        <el-table-column prop="reader" label="抄表人" width="100" />
+        <el-table-column label="抄表时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.readingTime) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.active" type="success">有效</el-tag>
+            <el-tag v-else type="info">已作废</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="作废信息" min-width="180">
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="!row.active"
+              :content="`作废人：${row.voidOperator || '-'}，作废时间：${formatTime(row.voidTime)}`"
+              placement="top"
+            >
+              <span>{{ row.voidReason }}</span>
+            </el-tooltip>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-else class="empty-tip">暂无电表抄表记录</div>
+    </el-card>
+
+    <el-card style="margin-top: 20px;">
       <template #header>归属调整历史</template>
       <el-table :data="adjustmentRecords" border v-if="adjustmentRecords.length > 0">
         <el-table-column prop="id" label="记录ID" width="80" />
@@ -495,6 +563,11 @@ const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.reading-meta {
+  color: #999;
+  font-size: 12px;
 }
 
 .empty-tip {

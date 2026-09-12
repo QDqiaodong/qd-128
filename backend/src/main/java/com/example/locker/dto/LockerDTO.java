@@ -39,6 +39,8 @@ public class LockerDTO {
     private Boolean keyBorrowed;
     /** 未还借用条数（借用中记录数） */
     private Integer openKeyBorrowCount;
+    /** 本月是否已抄电表（已抄/未抄标记，由有效抄表单实时推导，刷新后保持一致） */
+    private Boolean meterReadThisMonth;
     private String remark;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

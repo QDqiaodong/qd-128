@@ -5,15 +5,18 @@ import com.example.locker.entity.AdjustmentRecord;
 import com.example.locker.entity.ClearanceOrder;
 import com.example.locker.entity.KeyBorrowRecord;
 import com.example.locker.entity.Locker;
+import com.example.locker.entity.MeterReadingRecord;
 import com.example.locker.entity.StatusChangeRecord;
 import com.example.locker.enums.ClearanceStatus;
 import com.example.locker.enums.KeyBorrowStatus;
 import com.example.locker.enums.LockerStatus;
+import com.example.locker.enums.MeterReadingStatus;
 import com.example.locker.repository.AdjustmentRecordRepository;
 import com.example.locker.repository.BuildingRepository;
 import com.example.locker.repository.ClearanceOrderRepository;
 import com.example.locker.repository.KeyBorrowRecordRepository;
 import com.example.locker.repository.LockerRepository;
+import com.example.locker.repository.MeterReadingRecordRepository;
 import com.example.locker.repository.StatusChangeRecordRepository;
 import com.example.locker.repository.UnitRepository;
 import jakarta.persistence.criteria.Predicate;
@@ -28,6 +31,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
 import java.time.LocalDate;
+import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -59,6 +63,9 @@ public class LockerService {
 
     @Autowired
     private KeyBorrowRecordRepository keyBorrowRecordRepository;
+
+    @Autowired
+    private MeterReadingRecordRepository meterReadingRecordRepository;
 
     @Autowired
     private SpecTemplateService specTemplateService;
@@ -115,6 +122,7 @@ public class LockerService {
                 .collect(Collectors.toList());
         fillClearanceInfo(dtoList);
         fillKeyBorrowInfo(dtoList);
+        fillMeterReadingInfo(dtoList);
         return new PageResponse<>(dtoList, lockerPage.getTotalElements(), page, size);
     }
 
@@ -124,6 +132,7 @@ public class LockerService {
         LockerDTO dto = convertToDTO(locker);
         fillClearanceInfo(java.util.Collections.singletonList(dto));
         fillKeyBorrowInfo(java.util.Collections.singletonList(dto));
+        fillMeterReadingInfo(java.util.Collections.singletonList(dto));
         return dto;
     }
 
@@ -166,6 +175,26 @@ public class LockerService {
                     java.util.Collections.emptyList());
             dto.setKeyBorrowed(!open.isEmpty());
             dto.setOpenKeyBorrowCount(open.size());
+        }
+    }
+
+    /**
+     * 本月已抄标记实时由当前自然月的有效抄表单推导，
+     * 抄表单是唯一数据源，保证刷新后柜体列表/详情的已抄标记
+     * 与抄表页本月已抄台数、柜体页读数保持一致。
+     */
+    private void fillMeterReadingInfo(List<LockerDTO> dtos) {
+        if (dtos == null || dtos.isEmpty()) {
+            return;
+        }
+        String currentPeriod = YearMonth.now().format(DateTimeFormatter.ofPattern("yyyy-MM"));
+        List<Long> lockerIds = dtos.stream().map(LockerDTO::getId).collect(Collectors.toList());
+        java.util.Set<Long> readLockerIds = meterReadingRecordRepository
+                .findByLockerIdInAndPeriodMonthAndStatus(lockerIds, currentPeriod, MeterReadingStatus.ACTIVE)
+                .stream().map(MeterReadingRecord::getLockerId)
+                .collect(Collectors.toSet());
+        for (LockerDTO dto : dtos) {
+            dto.setMeterReadThisMonth(readLockerIds.contains(dto.getId()));
         }
     }
 

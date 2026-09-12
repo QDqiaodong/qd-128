@@ -36,6 +36,8 @@ export interface LockerDTO {
   keyBorrowed?: boolean
   /** 未还借用条数（借用中记录数） */
   openKeyBorrowCount?: number
+  /** 本月是否已抄电表（已抄/未抄标记，由有效抄表单实时推导） */
+  meterReadThisMonth?: boolean
   remark: string
   createTime: string
   updateTime: string

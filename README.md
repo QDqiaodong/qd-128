@@ -174,3 +174,36 @@ Docker Compose 使用固定端口并绑定 `127.0.0.1`；前后端 Dockerfile �
 - `GET  /api/key-borrows/locker-overview`：按柜钥匙状态一览（含未还条数）
 - `GET  /api/key-borrows/locker-options`：登记可选柜体（含永久停用柜）
 - `GET  /api/key-borrows/statuses`：借用状态字典
+
+## 电表抄表模块
+
+「电表抄表」页面（`/meter-readings`）供物业按柜登记每月电表读数、抄表人和抄表时间，并维护抄表单的作废痕迹。
+
+### 登记抄表
+
+- 登记时必须填写**柜体**、**电表读数**（不能为负）、**抄表人**和**抄表时间**；抄表时间不能晚于当前时间，补登历史月份可选过去时间。
+- **账期（自然月）由抄表时间自动推导**，无需手工选择，保证同一自然月的单据账期口径一致。
+- **同一柜同一自然月不能同时挂两张未作废抄表单**：该柜该月已存在有效单时，登记下拉框中对应柜体置灰并标记「本月已抄」，后端也会再次拦截并提示先作废原单；已作废的单不占用该月额度，作废后可重新登记。
+- 整个登记在单个事务内一次落库，任一校验不通过整体回滚，**关闭抄表窗未提交不会写出半张单据**；前端抄表窗口未提交前关闭仅丢弃草稿（已填写内容时关闭需二次确认），不产生任何数据。
+
+### 作废抄表单
+
+- 作废**必须填写作废原因**，可填作废人（留空默认“系统管理员”）；系统留存作废原因、作废人和作废时间。
+- 已作废的单不能重复作废；作废后该柜该月不再占用有效单额度，可重新登记。
+
+### 已抄 / 未抄标记与一致性
+
+- 「按柜本月抄表」一览列出全部柜体（含停用柜），未抄的柜体置顶，并汇总**本月已抄台数**；支持按已抄/未抄过滤。
+- 「快递柜列表」「快递柜详情」均显示「本月已抄 / 本月未抄」标记，详情页另设「电表抄表记录」卡片留存该柜全部抄表历史（含已作废单），并在基本信息中展示**本月电表读数**、抄表人和抄表时间。
+- 已抄/未抄标记、本月已抄台数、柜体页读数全部以 `meter_reading_record` 表的有效（未作废）单为唯一数据源实时推导，**刷新页面后一览台数、柜体页读数和筛选结果保持一致**。
+
+相关接口（前缀 `/api/meter-readings`）：
+
+- `POST /api/meter-readings`：登记抄表，body 为 `{ lockerId, readingValue, reader, readingTime, remark? }`，账期由抄表时间推导
+- `GET  /api/meter-readings?page=&size=&periodMonth=&status=&lockerId=&keyword=`：分页抄表单列表，`status=ACTIVE/VOIDED`，`periodMonth` 格式 `yyyy-MM`
+- `GET  /api/meter-readings/{id}`：抄表单详情
+- `POST /api/meter-readings/{id}/void`：作废抄表单，body 为 `{ voidReason, voidOperator? }`，作废原因必填
+- `GET  /api/meter-readings/locker/{lockerId}`：某台柜体的全部抄表单
+- `GET  /api/meter-readings/locker-overview?periodMonth=`：按柜抄表状态一览（默认当前自然月，含本月读数）
+- `GET  /api/meter-readings/locker-options`：登记可选柜体（本月已抄的柜体标记置灰）
+- `GET  /api/meter-readings/statuses`：抄表单状态字典
