@@ -126,6 +126,39 @@ public class KeyBorrowService {
         return toDTO(keyBorrowRecordRepository.save(record));
     }
 
+    // ===================== 借用改期 =====================
+
+    /**
+     * 借用改期：钥匙未还且预计归还已到时，在原借用单上改一个更晚的预计归还并写明改期原因。
+     * 已归还的单不能改；整个改期在单个事务内一次落库，任一校验不通过整体回滚，
+     * 不会写出半条改期。改期只更新预计归还时间与改期痕迹，不改变借用状态，
+     * 因此按柜一览的未还条数不会因改期减少。
+     */
+    @Transactional
+    public KeyBorrowRecordDTO extendRecord(Long id, KeyBorrowExtendRequest request) {
+        if (request == null || request.getExpectedReturnTime() == null) {
+            throw new IllegalArgumentException("请选择新的预计归还时间");
+        }
+        if (!StringUtils.hasText(request.getExtendReason())) {
+            throw new IllegalArgumentException("请填写改期原因");
+        }
+        KeyBorrowRecord record = keyBorrowRecordRepository.findById(id).orElseThrow(() ->
+                new RuntimeException("借用记录不存在: " + id));
+        if (record.getStatus() == KeyBorrowStatus.RETURNED) {
+            throw new IllegalArgumentException("该记录已归还，不能改期");
+        }
+        if (record.getExpectedReturnTime() != null
+                && !request.getExpectedReturnTime().isAfter(record.getExpectedReturnTime())) {
+            throw new IllegalArgumentException("新的预计归还时间必须晚于原预计归还时间");
+        }
+
+        record.setExpectedReturnTime(request.getExpectedReturnTime());
+        record.setExtendCount((record.getExtendCount() == null ? 0 : record.getExtendCount()) + 1);
+        record.setLastExtendReason(request.getExtendReason().trim());
+        record.setLastExtendTime(LocalDateTime.now());
+        return toDTO(keyBorrowRecordRepository.save(record));
+    }
+
     // ===================== 查询 =====================
 
     /**
@@ -296,6 +329,9 @@ public class KeyBorrowService {
         dto.setReturner(record.getReturner());
         dto.setReturnTime(record.getReturnTime());
         dto.setRemark(record.getRemark());
+        dto.setExtendCount(record.getExtendCount() == null ? 0 : record.getExtendCount());
+        dto.setLastExtendReason(record.getLastExtendReason());
+        dto.setLastExtendTime(record.getLastExtendTime());
         dto.setCreateTime(record.getCreateTime());
         dto.setUpdateTime(record.getUpdateTime());
 

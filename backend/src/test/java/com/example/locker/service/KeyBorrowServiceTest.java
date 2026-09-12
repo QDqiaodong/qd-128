@@ -1,6 +1,7 @@
 package com.example.locker.service;
 
 import com.example.locker.dto.KeyBorrowCreateRequest;
+import com.example.locker.dto.KeyBorrowExtendRequest;
 import com.example.locker.dto.KeyBorrowRecordDTO;
 import com.example.locker.dto.KeyBorrowReturnRequest;
 import com.example.locker.dto.LockerKeyBorrowOverviewDTO;
@@ -211,6 +212,115 @@ class KeyBorrowServiceTest {
         request.setReturnTime(LocalDateTime.now().minusHours(5));
         assertThrows(IllegalArgumentException.class,
                 () -> keyBorrowService.returnRecord(1L, request));
+        verify(keyBorrowRecordRepository, never()).save(any(KeyBorrowRecord.class));
+    }
+
+    @Test
+    void extendRecordUpdatesExpectedReturnAndKeepsOnLoan() {
+        // 逾期未还的借用单可改期：预计归还更新为更晚时间，状态仍为借用中，未还条数不减少
+        KeyBorrowRecord record = new KeyBorrowRecord();
+        record.setId(1L);
+        record.setLockerId(1L);
+        record.setStatus(KeyBorrowStatus.ON_LOAN);
+        record.setBorrowTime(LocalDateTime.now().minusDays(2));
+        record.setExpectedReturnTime(LocalDateTime.now().minusHours(1));
+        when(keyBorrowRecordRepository.findById(1L)).thenReturn(Optional.of(record));
+        when(keyBorrowRecordRepository.save(any(KeyBorrowRecord.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(lockerRepository.findById(1L)).thenReturn(Optional.of(locker));
+
+        KeyBorrowExtendRequest request = new KeyBorrowExtendRequest();
+        LocalDateTime newExpected = LocalDateTime.now().plusDays(3);
+        request.setExpectedReturnTime(newExpected);
+        request.setExtendReason("维修配件未到，顺延三天");
+        KeyBorrowRecordDTO dto = keyBorrowService.extendRecord(1L, request);
+
+        assertEquals(newExpected, dto.getExpectedReturnTime());
+        assertEquals(KeyBorrowStatus.ON_LOAN, dto.getStatus());
+        assertTrue(dto.getOnLoan(), "改期后仍为借用中，未还条数不减少");
+        assertFalse(dto.getReturnOverdue(), "改期到未来后不再逾期");
+        assertEquals(1, dto.getExtendCount());
+        assertEquals("维修配件未到，顺延三天", dto.getLastExtendReason());
+        assertNotNull(dto.getLastExtendTime());
+        verify(keyBorrowRecordRepository, times(1)).save(any(KeyBorrowRecord.class));
+    }
+
+    @Test
+    void extendRecordAccumulatesExtendCount() {
+        KeyBorrowRecord record = new KeyBorrowRecord();
+        record.setId(1L);
+        record.setLockerId(1L);
+        record.setStatus(KeyBorrowStatus.ON_LOAN);
+        record.setExpectedReturnTime(LocalDateTime.now().minusHours(2));
+        record.setExtendCount(2);
+        when(keyBorrowRecordRepository.findById(1L)).thenReturn(Optional.of(record));
+        when(keyBorrowRecordRepository.save(any(KeyBorrowRecord.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(lockerRepository.findById(1L)).thenReturn(Optional.of(locker));
+
+        KeyBorrowExtendRequest request = new KeyBorrowExtendRequest();
+        request.setExpectedReturnTime(LocalDateTime.now().plusDays(1));
+        request.setExtendReason("再次顺延");
+        KeyBorrowRecordDTO dto = keyBorrowService.extendRecord(1L, request);
+
+        assertEquals(3, dto.getExtendCount());
+    }
+
+    @Test
+    void extendRecordRejectsAlreadyReturned() {
+        // 已经还清的单不能改期
+        KeyBorrowRecord record = new KeyBorrowRecord();
+        record.setId(1L);
+        record.setStatus(KeyBorrowStatus.RETURNED);
+        when(keyBorrowRecordRepository.findById(1L)).thenReturn(Optional.of(record));
+
+        KeyBorrowExtendRequest request = new KeyBorrowExtendRequest();
+        request.setExpectedReturnTime(LocalDateTime.now().plusDays(1));
+        request.setExtendReason("尝试改期");
+        assertThrows(IllegalArgumentException.class,
+                () -> keyBorrowService.extendRecord(1L, request));
+        verify(keyBorrowRecordRepository, never()).save(any(KeyBorrowRecord.class));
+    }
+
+    @Test
+    void extendRecordRejectsNotLaterExpectedReturnTime() {
+        // 只能改一个更晚的预计归还
+        KeyBorrowRecord record = new KeyBorrowRecord();
+        record.setId(1L);
+        record.setStatus(KeyBorrowStatus.ON_LOAN);
+        record.setExpectedReturnTime(LocalDateTime.now().plusHours(5));
+        when(keyBorrowRecordRepository.findById(1L)).thenReturn(Optional.of(record));
+
+        KeyBorrowExtendRequest earlier = new KeyBorrowExtendRequest();
+        earlier.setExpectedReturnTime(LocalDateTime.now().plusHours(1));
+        earlier.setExtendReason("提前");
+        assertThrows(IllegalArgumentException.class,
+                () -> keyBorrowService.extendRecord(1L, earlier));
+
+        KeyBorrowExtendRequest same = new KeyBorrowExtendRequest();
+        same.setExpectedReturnTime(record.getExpectedReturnTime());
+        same.setExtendReason("不变");
+        assertThrows(IllegalArgumentException.class,
+                () -> keyBorrowService.extendRecord(1L, same));
+        verify(keyBorrowRecordRepository, never()).save(any(KeyBorrowRecord.class));
+    }
+
+    @Test
+    void extendRecordRejectsMissingFields() {
+        // 缺新预计归还时间或改期原因时整体拒绝，不落库，避免半条改期
+        KeyBorrowExtendRequest noTime = new KeyBorrowExtendRequest();
+        noTime.setExtendReason("原因");
+        assertThrows(IllegalArgumentException.class,
+                () -> keyBorrowService.extendRecord(1L, noTime));
+
+        KeyBorrowExtendRequest noReason = new KeyBorrowExtendRequest();
+        noReason.setExpectedReturnTime(LocalDateTime.now().plusDays(1));
+        noReason.setExtendReason("  ");
+        assertThrows(IllegalArgumentException.class,
+                () -> keyBorrowService.extendRecord(1L, noReason));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> keyBorrowService.extendRecord(1L, null));
         verify(keyBorrowRecordRepository, never()).save(any(KeyBorrowRecord.class));
     }
 

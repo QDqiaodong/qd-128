@@ -48,6 +48,14 @@ public class KeyBorrowController {
         return ResponseEntity.ok(keyBorrowService.returnRecord(id, request));
     }
 
+    /** 借用改期：仅借用中可改，新的预计归还必须更晚，改期原因必填；已归还的单不能改 */
+    @PostMapping("/{id}/extend")
+    public ResponseEntity<KeyBorrowRecordDTO> extendRecord(
+            @PathVariable Long id,
+            @RequestBody KeyBorrowExtendRequest request) {
+        return ResponseEntity.ok(keyBorrowService.extendRecord(id, request));
+    }
+
     /** 某台柜体的全部借用记录 */
     @GetMapping("/locker/{lockerId}")
     public ResponseEntity<List<KeyBorrowRecordDTO>> getLockerRecords(@PathVariable Long lockerId) {

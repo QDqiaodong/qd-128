@@ -247,6 +247,79 @@ const submitReturn = async () => {
   }
 }
 
+// ---------------- 借用改期 ----------------
+
+const extendDialogVisible = ref(false)
+const extending = ref(false)
+const extendTarget = ref<KeyBorrowRecord | null>(null)
+const extendForm = ref<{ expectedReturnTime: string | null; extendReason: string }>({
+  expectedReturnTime: null,
+  extendReason: ''
+})
+
+const openExtendDialog = (record: KeyBorrowRecord) => {
+  extendTarget.value = record
+  extendForm.value = { expectedReturnTime: null, extendReason: '' }
+  extendDialogVisible.value = true
+}
+
+/** 改期表单已填写内容时，关闭窗口前确认，避免误关留下误解 */
+const extendFormDirty = computed(() =>
+  !!(extendForm.value.expectedReturnTime || extendForm.value.extendReason.trim())
+)
+
+/**
+ * 改期内容只保存在本窗口内，未提交前关闭不会写入任何数据；
+ * 已填写内容时关闭需二次确认，关掉窗口不会留下半条改期。
+ */
+const handleExtendDialogClose = (done: () => void) => {
+  if (!extendFormDirty.value) {
+    done()
+    return
+  }
+  ElMessageBox.confirm('关闭后本次填写的改期内容将丢弃，原预计归还时间不变，确认关闭？', '提示', {
+    type: 'warning',
+    confirmButtonText: '丢弃并关闭',
+    cancelButtonText: '继续填写'
+  })
+    .then(() => done())
+    .catch(() => {})
+}
+
+const submitExtend = async () => {
+  const record = extendTarget.value
+  if (!record) return
+  const f = extendForm.value
+  if (!f.expectedReturnTime) {
+    ElMessage.warning('请选择新的预计归还时间')
+    return
+  }
+  if (f.expectedReturnTime <= record.expectedReturnTime) {
+    ElMessage.warning('新的预计归还时间必须晚于原预计归还时间')
+    return
+  }
+  if (!f.extendReason.trim()) {
+    ElMessage.warning('请填写改期原因')
+    return
+  }
+  extending.value = true
+  try {
+    await keyBorrowApi.extendRecord(record.id, {
+      expectedReturnTime: f.expectedReturnTime,
+      extendReason: f.extendReason.trim()
+    })
+    ElMessage.success('改期成功，预计归还时间已更新')
+    extendDialogVisible.value = false
+    await fetchRecords()
+    // 无论当前在哪个页签都同步刷新按柜一览，保证页头未还条数与台账、各柜状态实时一致
+    await fetchOverview()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '改期失败')
+  } finally {
+    extending.value = false
+  }
+}
+
 // ---------------- 展示辅助 ----------------
 
 const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
@@ -312,8 +385,17 @@ onMounted(() => {
         <el-table-column label="借出时间" width="160">
           <template #default="{ row }">{{ formatTime(row.borrowTime) }}</template>
         </el-table-column>
-        <el-table-column label="预计归还" width="160">
-          <template #default="{ row }">{{ formatTime(row.expectedReturnTime) }}</template>
+        <el-table-column label="预计归还" width="200">
+          <template #default="{ row }">
+            {{ formatTime(row.expectedReturnTime) }}
+            <el-tooltip
+              v-if="row.extendCount > 0"
+              :content="`最近改期：${formatTime(row.lastExtendTime)}，原因：${row.lastExtendReason || '-'}`"
+              placement="top"
+            >
+              <el-tag type="warning" size="small" style="margin-left: 4px">改期×{{ row.extendCount }}</el-tag>
+            </el-tooltip>
+          </template>
         </el-table-column>
         <el-table-column label="状态" width="110">
           <template #default="{ row }">
@@ -328,14 +410,21 @@ onMounted(() => {
         <el-table-column label="归还时间" width="160">
           <template #default="{ row }">{{ formatTime(row.returnTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="110" fixed="right">
+        <el-table-column label="操作" width="170" fixed="right">
           <template #default="{ row }">
-            <el-button
-              v-if="row.onLoan"
-              size="small"
-              type="warning"
-              @click="openReturnDialog(row)"
-            >归还</el-button>
+            <template v-if="row.onLoan">
+              <el-button
+                size="small"
+                type="primary"
+                plain
+                @click="openExtendDialog(row)"
+              >改期</el-button>
+              <el-button
+                size="small"
+                type="warning"
+                @click="openReturnDialog(row)"
+              >归还</el-button>
+            </template>
           </template>
         </el-table-column>
       </el-table>
@@ -492,6 +581,54 @@ onMounted(() => {
       <template #footer>
         <el-button @click="handleCreateDialogClose(() => (createDialogVisible = false))">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitCreate">提交登记</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ================= 借用改期弹窗 ================= -->
+    <el-dialog
+      title="借用改期"
+      v-model="extendDialogVisible"
+      width="520px"
+      :close-on-click-modal="false"
+      :before-close="handleExtendDialogClose"
+    >
+      <template v-if="extendTarget">
+        <el-alert type="warning" :closable="false" class="dialog-tip">
+          仅借用中的记录可改期，已归还的单不能改；改期后柜体仍标记「借用中」，未还条数不变。
+        </el-alert>
+        <el-descriptions :column="2" border class="dialog-tip">
+          <el-descriptions-item label="台账编号">{{ extendTarget.recordNo }}</el-descriptions-item>
+          <el-descriptions-item label="柜体">{{ extendTarget.lockerNo }}</el-descriptions-item>
+          <el-descriptions-item label="借出人">{{ extendTarget.borrower }}</el-descriptions-item>
+          <el-descriptions-item label="原预计归还">
+            {{ formatTime(extendTarget.expectedReturnTime) }}
+            <el-tag v-if="extendTarget.returnOverdue" type="danger" size="small" style="margin-left: 4px">已逾期</el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+        <el-form label-width="90px">
+          <el-form-item label="新预计归还" required>
+            <el-date-picker
+              v-model="extendForm.expectedReturnTime"
+              type="datetime"
+              placeholder="选择一个更晚的预计归还时间"
+              format="YYYY-MM-DD HH:mm"
+              value-format="YYYY-MM-DD[T]HH:mm:ss"
+              style="width: 100%"
+            />
+          </el-form-item>
+          <el-form-item label="改期原因" required>
+            <el-input
+              v-model="extendForm.extendReason"
+              type="textarea"
+              :rows="2"
+              placeholder="必填，如：维修配件未到，顺延三天"
+            />
+          </el-form-item>
+        </el-form>
+      </template>
+      <template #footer>
+        <el-button @click="handleExtendDialogClose(() => (extendDialogVisible = false))">取消</el-button>
+        <el-button type="primary" :loading="extending" @click="submitExtend">确认改期</el-button>
       </template>
     </el-dialog>
 

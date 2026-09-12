@@ -33,6 +33,12 @@ export interface KeyBorrowRecord {
   returner: string | null
   returnTime: string | null
   remark: string | null
+  /** 改期次数：借用中延后预计归还的累计次数 */
+  extendCount: number
+  /** 最近一次改期原因 */
+  lastExtendReason: string | null
+  /** 最近一次改期时间 */
+  lastExtendTime: string | null
   createTime: string
   updateTime: string
 }
@@ -72,6 +78,13 @@ export interface KeyBorrowCreateRequest {
   remark?: string
 }
 
+export interface KeyBorrowExtendRequest {
+  /** 新的预计归还时间，必须晚于原预计归还时间 */
+  expectedReturnTime: string
+  /** 改期原因（必填） */
+  extendReason: string
+}
+
 export interface KeyBorrowListParams {
   page?: number
   size?: number
@@ -109,6 +122,11 @@ export const keyBorrowApi = {
 
   returnRecord(id: number, returner: string, returnTime?: string | null) {
     return api.post<KeyBorrowRecord>(`/key-borrows/${id}/return`, { returner, returnTime: returnTime || undefined })
+  },
+
+  /** 借用改期：仅借用中可改，新的预计归还必须更晚，改期原因必填 */
+  extendRecord(id: number, data: KeyBorrowExtendRequest) {
+    return api.post<KeyBorrowRecord>(`/key-borrows/${id}/extend`, data)
   },
 
   getLockerRecords(lockerId: number) {

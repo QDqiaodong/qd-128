@@ -33,6 +33,12 @@ public class KeyBorrowRecordDTO {
     private String returner;
     private LocalDateTime returnTime;
     private String remark;
+    /** 改期次数：借用中延后预计归还的累计次数 */
+    private Integer extendCount;
+    /** 最近一次改期原因 */
+    private String lastExtendReason;
+    /** 最近一次改期时间 */
+    private LocalDateTime lastExtendTime;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }

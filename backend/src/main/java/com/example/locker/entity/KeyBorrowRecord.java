@@ -61,6 +61,18 @@ public class KeyBorrowRecord {
     @Column(name = "remark", columnDefinition = "TEXT")
     private String remark;
 
+    /** 改期次数（借用中可多次延后预计归还，每次累计） */
+    @Column(name = "extend_count", nullable = false)
+    private Integer extendCount = 0;
+
+    /** 最近一次改期原因（改期必填） */
+    @Column(name = "last_extend_reason", length = 500)
+    private String lastExtendReason;
+
+    /** 最近一次改期时间 */
+    @Column(name = "last_extend_time")
+    private LocalDateTime lastExtendTime;
+
     @Column(name = "create_time")
     private LocalDateTime createTime;
 

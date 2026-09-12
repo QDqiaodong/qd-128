@@ -334,8 +334,17 @@ const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
         <el-table-column label="借出时间" width="160">
           <template #default="{ row }">{{ formatTime(row.borrowTime) }}</template>
         </el-table-column>
-        <el-table-column label="预计归还" width="160">
-          <template #default="{ row }">{{ formatTime(row.expectedReturnTime) }}</template>
+        <el-table-column label="预计归还" width="200">
+          <template #default="{ row }">
+            {{ formatTime(row.expectedReturnTime) }}
+            <el-tooltip
+              v-if="row.extendCount > 0"
+              :content="`最近改期：${formatTime(row.lastExtendTime)}，原因：${row.lastExtendReason || '-'}`"
+              placement="top"
+            >
+              <el-tag type="warning" size="small" style="margin-left: 4px">改期×{{ row.extendCount }}</el-tag>
+            </el-tooltip>
+          </template>
         </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
