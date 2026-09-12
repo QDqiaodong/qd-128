@@ -65,14 +65,18 @@ const handlePageChange = (page: number) => {
 
 const overview = ref<LockerKeyBorrowOverview[]>([])
 const overviewLoading = ref(false)
+/** 一览是否已成功加载过：未加载前页头不显示具体未还条数，避免把「加载中/加载失败」误判为钥匙已全部还清 */
+const overviewLoaded = ref(false)
 
 const fetchOverview = async () => {
   overviewLoading.value = true
   try {
     const res = await keyBorrowApi.getLockerOverview()
     overview.value = res.data
+    overviewLoaded.value = true
   } catch (error) {
     console.error('获取柜体钥匙状态一览失败', error)
+    ElMessage.error('获取柜体钥匙状态一览失败，未还条数暂未更新，请重新切换或刷新')
   } finally {
     overviewLoading.value = false
   }
@@ -194,9 +198,8 @@ const submitCreate = async () => {
     createDialogVisible.value = false
     createForm.value = emptyCreateForm()
     await fetchRecords()
-    if (activeTab.value === 'overview') {
-      await fetchOverview()
-    }
+    // 无论当前在哪个页签都同步刷新按柜一览，保证页头未还条数与台账、各柜状态实时一致
+    await fetchOverview()
   } catch (error: any) {
     ElMessage.error(error.response?.data?.message || '登记失败')
   } finally {
@@ -235,9 +238,8 @@ const submitReturn = async () => {
     ElMessage.success('钥匙归还登记成功')
     returnDialogVisible.value = false
     await fetchRecords()
-    if (activeTab.value === 'overview') {
-      await fetchOverview()
-    }
+    // 无论当前在哪个页签都同步刷新按柜一览，保证页头未还条数与台账、各柜状态实时一致
+    await fetchOverview()
   } catch (error: any) {
     ElMessage.error(error.response?.data?.message || '归还登记失败')
   } finally {
@@ -254,6 +256,8 @@ const disableFutureDate = (date: Date) => date.getTime() > Date.now()
 
 onMounted(() => {
   fetchRecords()
+  // 进入页面即预取按柜一览，保证第一次切到一览时页头未还条数已与各柜、柜体页标记一致
+  fetchOverview()
 })
 </script>
 
@@ -350,8 +354,10 @@ onMounted(() => {
     <!-- ================= 按柜钥匙状态一览 ================= -->
     <template v-else>
       <el-alert type="info" :closable="false" class="overview-tip">
-        全部柜体（含停用柜）列出：钥匙未还的柜体标记「借用中」，当前共有
-        <b>{{ openRecordTotal }}</b> 条未还记录；永久停用柜也可补登历史借用。
+        全部柜体（含停用柜）列出：钥匙未还的柜体标记「借用中」，
+        <template v-if="overviewLoaded">当前共有 <b>{{ openRecordTotal }}</b> 条未还记录；</template>
+        <template v-else>未还条数统计中…；</template>
+        永久停用柜也可补登历史借用。
       </el-alert>
       <div class="list-header">
         <span />
