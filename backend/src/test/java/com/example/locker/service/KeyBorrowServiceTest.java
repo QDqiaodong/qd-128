@@ -82,7 +82,7 @@ class KeyBorrowServiceTest {
         KeyBorrowRecordDTO dto = keyBorrowService.createRecord(validRequest());
 
         assertEquals(KeyBorrowStatus.ON_LOAN, dto.getStatus());
-        assertTrue("借用中标记应为 true", dto.getOnLoan());
+        assertTrue(dto.getOnLoan(), "借用中标记应为 true");
         assertEquals("王维修", dto.getBorrower());
         assertEquals("柜门检修", dto.getReason());
         assertNotNull(dto.getRecordNo());
