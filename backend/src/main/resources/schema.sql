@@ -139,6 +139,25 @@ CREATE TABLE IF NOT EXISTS inspection_issue (
     FOREIGN KEY (locker_id) REFERENCES locker(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='巡检异常待处理记录表';
 
+CREATE TABLE IF NOT EXISTS clearance_order (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_no VARCHAR(40) NOT NULL UNIQUE COMMENT '清柜单号',
+    locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    overdue_compartments VARCHAR(500) NOT NULL COMMENT '滞留格口',
+    package_count INT NOT NULL COMMENT '滞留件数',
+    found_time DATETIME NOT NULL COMMENT '发现时间',
+    handler VARCHAR(50) NOT NULL COMMENT '处理人',
+    status VARCHAR(20) NOT NULL DEFAULT 'PROCESSING' COMMENT '单据状态: PROCESSING-办理中, COMPLETED-已办结',
+    handle_result TEXT COMMENT '处理结果(办结必填)',
+    complete_time DATETIME COMMENT '办结时间',
+    remark TEXT COMMENT '备注',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_clearance_locker (locker_id),
+    INDEX idx_clearance_status (status),
+    FOREIGN KEY (locker_id) REFERENCES locker(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='滞留件清柜单表';
+
 -- ===================== 种子数据（幂等，可重复执行） =====================
 -- 说明：docker-entrypoint-initdb.d 只在空数据卷首次初始化时执行本脚本；
 -- 若数据卷中已有楼栋/单元（旧版本初始化、初始化中断后重启等），
@@ -192,3 +211,16 @@ INSERT IGNORE INTO locker (locker_no, compartment_count, spec_type, building_id,
 SELECT 'KDG-004', 30, 'MIXED', b.id, u.id, '1层', '2024-05-12', 'ACTIVE'
 FROM building b JOIN unit u ON u.code = 'U005' AND u.building_id = b.id
 WHERE b.code = 'B003';
+
+-- 滞留件清柜单：按单号幂等补种；KDG-001 办理中（列表/详情显示滞留中），KDG-003 已办结
+INSERT INTO clearance_order (order_no, locker_id, overdue_compartments, package_count, found_time, handler, status, remark)
+SELECT 'QG20260901001', l.id, 'A03,A07', 2, '2026-09-01 09:30:00', '张师傅', 'PROCESSING', '超期3天未取，已电话通知业主'
+FROM locker l
+WHERE l.locker_no = 'KDG-001'
+  AND NOT EXISTS (SELECT 1 FROM clearance_order c WHERE c.order_no = 'QG20260901001');
+
+INSERT INTO clearance_order (order_no, locker_id, overdue_compartments, package_count, found_time, handler, status, handle_result, complete_time)
+SELECT 'QG20260820001', l.id, 'B12', 1, '2026-08-20 15:00:00', '李管家', 'COMPLETED', '业主已取走滞留件，格口清空并消毒', '2026-08-22 10:00:00'
+FROM locker l
+WHERE l.locker_no = 'KDG-003'
+  AND NOT EXISTS (SELECT 1 FROM clearance_order c WHERE c.order_no = 'QG20260820001');

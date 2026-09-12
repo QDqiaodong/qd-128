@@ -19,6 +19,8 @@ public interface LockerRepository extends JpaRepository<Locker, Long>, JpaSpecif
 
     List<Locker> findByBuildingId(Long buildingId);
 
+    List<Locker> findByStatus(LockerStatus status);
+
     List<Locker> findByBuildingIdAndStatus(Long buildingId, LockerStatus status);
 
     List<Locker> findByUnitId(Long unitId);

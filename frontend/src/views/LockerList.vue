@@ -183,9 +183,10 @@ const confirmStatusChange = async () => {
       <el-table-column prop="floor" label="楼层" width="80">
         <template #default="{ row }">{{ row.floor || '-' }}</template>
       </el-table-column>
-      <el-table-column label="状态" width="110">
+      <el-table-column label="状态" width="160">
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
+          <el-tag v-if="row.overdue" type="danger" style="margin-left: 4px">滞留中</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="updateTime" label="更新时间" width="170">

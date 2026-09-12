@@ -2,7 +2,9 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { lockerApi, buildingApi, STATUS_NAME_MAP } from '@/api/locker'
+import { clearanceApi } from '@/api/clearance'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import type { ClearanceOrder } from '@/api/clearance'
 import type {
   LockerDTO,
   AdjustmentRecord,
@@ -20,6 +22,7 @@ const lockerId = ref(Number(route.params.id))
 const locker = ref<LockerDTO | null>(null)
 const adjustmentRecords = ref<AdjustmentRecord[]>([])
 const statusRecords = ref<StatusChangeRecord[]>([])
+const clearanceOrders = ref<ClearanceOrder[]>([])
 const buildingTree = ref<BuildingTreeDTO[]>([])
 const units = ref<UnitDTO[]>([])
 
@@ -116,16 +119,18 @@ onMounted(async () => {
 
 const fetchData = async () => {
   try {
-    const [lockerRes, recordsRes, statusRes, treeRes] = await Promise.all([
+    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes] = await Promise.all([
       lockerApi.getLockerById(lockerId.value),
       lockerApi.getAdjustmentRecords(lockerId.value),
       lockerApi.getStatusChangeRecords(lockerId.value),
-      buildingApi.getBuildingTree()
+      buildingApi.getBuildingTree(),
+      clearanceApi.getLockerOrders(lockerId.value)
     ])
     locker.value = lockerRes.data
     adjustmentRecords.value = recordsRes.data
     statusRecords.value = statusRes.data
     buildingTree.value = treeRes.data
+    clearanceOrders.value = clearanceRes.data
   } catch (error) {
     console.error('获取数据失败', error)
   }
@@ -170,7 +175,7 @@ const handleBack = () => {
   router.push('/lockers')
 }
 
-const formatTime = (t?: string) => t || '-'
+const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
 </script>
 
 <template>
@@ -205,6 +210,9 @@ const formatTime = (t?: string) => t || '-'
         </el-descriptions-item>
         <el-descriptions-item label="当前状态">
           <el-tag :type="statusTagType(locker.status)">{{ statusLabel(locker.status) }}</el-tag>
+          <el-tag v-if="locker.overdue" type="danger" style="margin-left: 8px">
+            滞留中（{{ locker.overduePackageCount }} 件）
+          </el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="创建时间">
           {{ formatTime(locker.createTime) }}
@@ -274,6 +282,34 @@ const formatTime = (t?: string) => t || '-'
         <el-table-column prop="changeTime" label="变更时间" width="180" />
       </el-table>
       <div v-else class="empty-tip">暂无状态变更记录</div>
+    </el-card>
+
+    <el-card style="margin-top: 20px;">
+      <template #header>
+        <div class="card-header">
+          <span>滞留清柜记录</span>
+          <el-tag v-if="locker?.overdue" type="danger" size="small">滞留中</el-tag>
+        </div>
+      </template>
+      <el-table :data="clearanceOrders" border v-if="clearanceOrders.length > 0">
+        <el-table-column prop="orderNo" label="清柜单号" width="190" />
+        <el-table-column prop="overdueCompartments" label="滞留格口" min-width="110" show-overflow-tooltip />
+        <el-table-column prop="packageCount" label="件数" width="70" align="center" />
+        <el-table-column label="发现时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.foundTime) }}</template>
+        </el-table-column>
+        <el-table-column prop="handler" label="处理人" width="100" />
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.overdue" type="danger">滞留中</el-tag>
+            <el-tag v-else type="success">已办结</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="handleResult" label="处理结果" min-width="160" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.handleResult || '-' }}</template>
+        </el-table-column>
+      </el-table>
+      <div v-else class="empty-tip">暂无滞留清柜记录</div>
     </el-card>
 
     <el-card style="margin-top: 20px;">

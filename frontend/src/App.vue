@@ -7,6 +7,7 @@ import {
   Folder as Archive,
   OfficeBuilding as Building,
   CircleCheck,
+  AlarmClock,
   Expand,
   Fold
 } from '@element-plus/icons-vue'
@@ -69,6 +70,10 @@ const handleMenuSelect = (index: string) => {
           <CircleCheck />
           <span>物业巡检</span>
         </el-menu-item>
+        <el-menu-item index="/clearances">
+          <AlarmClock />
+          <span>滞留件清柜</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
     <el-container class="main-content">
@@ -85,6 +90,7 @@ const handleMenuSelect = (index: string) => {
           <template v-else-if="route.path === '/inspections'">物业巡检</template>
           <template v-else-if="route.path === '/inspections/create'">发起巡检任务</template>
           <template v-else-if="route.path.includes('/inspections/')">巡检任务详情</template>
+          <template v-else-if="route.path === '/clearances'">滞留件清柜</template>
         </div>
         <div class="header-actions">
           <button class="collapse-btn" @click="collapsed = !collapsed">

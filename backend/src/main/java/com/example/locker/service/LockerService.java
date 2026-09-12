@@ -2,11 +2,14 @@ package com.example.locker.service;
 
 import com.example.locker.dto.*;
 import com.example.locker.entity.AdjustmentRecord;
+import com.example.locker.entity.ClearanceOrder;
 import com.example.locker.entity.Locker;
 import com.example.locker.entity.StatusChangeRecord;
+import com.example.locker.enums.ClearanceStatus;
 import com.example.locker.enums.LockerStatus;
 import com.example.locker.repository.AdjustmentRecordRepository;
 import com.example.locker.repository.BuildingRepository;
+import com.example.locker.repository.ClearanceOrderRepository;
 import com.example.locker.repository.LockerRepository;
 import com.example.locker.repository.StatusChangeRecordRepository;
 import com.example.locker.repository.UnitRepository;
@@ -47,6 +50,9 @@ public class LockerService {
 
     @Autowired
     private StatusChangeRecordRepository statusChangeRecordRepository;
+
+    @Autowired
+    private ClearanceOrderRepository clearanceOrderRepository;
 
     @Autowired
     private SpecTemplateService specTemplateService;
@@ -101,13 +107,38 @@ public class LockerService {
         List<LockerDTO> dtoList = lockerPage.getContent().stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
+        fillClearanceInfo(dtoList);
         return new PageResponse<>(dtoList, lockerPage.getTotalElements(), page, size);
     }
 
     public LockerDTO getLockerById(Long id) {
         Locker locker = lockerRepository.findById(id).orElseThrow(() ->
                 new RuntimeException("快递柜不存在: " + id));
-        return convertToDTO(locker);
+        LockerDTO dto = convertToDTO(locker);
+        fillClearanceInfo(java.util.Collections.singletonList(dto));
+        return dto;
+    }
+
+    /**
+     * 滞留标记、在办单数与滞留件数实时由办理中的清柜单推导，
+     * 清柜单是唯一数据源，保证刷新后柜体标记与清柜单状态、件数一致。
+     */
+    private void fillClearanceInfo(List<LockerDTO> dtos) {
+        if (dtos == null || dtos.isEmpty()) {
+            return;
+        }
+        List<Long> lockerIds = dtos.stream().map(LockerDTO::getId).collect(Collectors.toList());
+        Map<Long, List<ClearanceOrder>> openByLocker = clearanceOrderRepository
+                .findByLockerIdInAndStatus(lockerIds, ClearanceStatus.PROCESSING).stream()
+                .collect(Collectors.groupingBy(ClearanceOrder::getLockerId));
+        for (LockerDTO dto : dtos) {
+            List<ClearanceOrder> open = openByLocker.getOrDefault(dto.getId(),
+                    java.util.Collections.emptyList());
+            dto.setOverdue(!open.isEmpty());
+            dto.setOpenClearanceCount(open.size());
+            dto.setOverduePackageCount(open.stream()
+                    .mapToInt(o -> o.getPackageCount() == null ? 0 : o.getPackageCount()).sum());
+        }
     }
 
     @Transactional

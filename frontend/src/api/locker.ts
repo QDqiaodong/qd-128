@@ -26,6 +26,12 @@ export interface LockerDTO {
   /** 归档详情中冗余的当前实时状态 */
   currentStatus?: LockerStatusCode
   currentStatusName?: string
+  /** 是否有办理中的滞留清柜单（滞留中标记） */
+  overdue?: boolean
+  /** 办理中的清柜单数 */
+  openClearanceCount?: number
+  /** 办理中清柜单的滞留件数合计 */
+  overduePackageCount?: number
   remark: string
   createTime: string
   updateTime: string

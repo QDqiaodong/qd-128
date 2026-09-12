@@ -9,6 +9,7 @@ import HierarchyManage from '@/views/HierarchyManage.vue'
 import InspectionList from '@/views/InspectionList.vue'
 import InspectionCreate from '@/views/InspectionCreate.vue'
 import InspectionDetail from '@/views/InspectionDetail.vue'
+import ClearanceList from '@/views/ClearanceList.vue'
 
 const routes = [
   { path: '/', name: 'Dashboard', component: Dashboard },
@@ -21,7 +22,8 @@ const routes = [
   { path: '/archives', name: 'ArchiveList', component: ArchiveList },
   { path: '/inspections', name: 'InspectionList', component: InspectionList },
   { path: '/inspections/create', name: 'InspectionCreate', component: InspectionCreate },
-  { path: '/inspections/:id', name: 'InspectionDetail', component: InspectionDetail }
+  { path: '/inspections/:id', name: 'InspectionDetail', component: InspectionDetail },
+  { path: '/clearances', name: 'ClearanceList', component: ClearanceList }
 ]
 
 const router = createRouter({

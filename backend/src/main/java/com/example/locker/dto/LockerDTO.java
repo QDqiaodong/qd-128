@@ -29,6 +29,12 @@ public class LockerDTO {
     /** 归档场景下冗余的当前状态，便于与快照对比 */
     private String currentStatus;
     private String currentStatusName;
+    /** 是否有办理中的滞留清柜单（滞留中标记，由清柜单实时推导，刷新后保持一致） */
+    private Boolean overdue;
+    /** 办理中的清柜单数 */
+    private Integer openClearanceCount;
+    /** 办理中清柜单的滞留件数合计 */
+    private Integer overduePackageCount;
     private String remark;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
