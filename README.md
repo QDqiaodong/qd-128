@@ -101,8 +101,9 @@ Docker Compose 使用固定端口并绑定 `127.0.0.1`；前后端 Dockerfile �
 
 ### 发起任务
 
-- 在「发起巡检任务」页选择**楼栋**（必填）与**单元**（不选则巡检整栋楼），系统按发起时刻该范围内的在管快递柜逐台冻结生成巡检明细，之后柜体归属调整不影响任务的柜体关联关系。
-- 可设置**巡检周期**（一次性/每日/每周/每月）、**负责人**、**截止时间**和创建人；所选范围内没有快递柜时不允许发起。
+- 在「发起巡检任务」页选择**楼栋**（必填）与**单元**（不选则巡检整栋楼），系统按发起时刻该范围内状态为 `ACTIVE` 的正常快递柜逐台冻结生成巡检明细；临时停用、永久停用柜不会进入新任务，之后柜体归属调整或状态变更不影响任务已冻结的柜体关联关系。
+- 选择楼栋/单元后实时刷新应检台数与可选柜体清单，停用柜仍可在快递柜列表和详情中查看档案；所选范围内没有正常快递柜时不允许发起。即使请求被篡改为传入停用柜 ID，后端也会再次过滤，不生成对应待检行。
+- 可设置**巡检周期**（一次性/每日/每周/每月）、**负责人**、**截止时间**和创建人。
 
 ### 逐台巡检与异常记录
 
@@ -123,7 +124,8 @@ Docker Compose 使用固定端口并绑定 `127.0.0.1`；前后端 Dockerfile �
 
 相关接口（前缀 `/api/inspections`）：
 
-- `POST /api/inspections`：发起任务，body 含 `taskName, buildingId, unitId?, cycle, assignee?, deadline?, creator?`
+- `GET  /api/inspections/scope?buildingId=&unitId=`：实时查询楼栋/单元下可纳入新巡检任务的正常柜及应检台数
+- `POST /api/inspections`：发起任务，body 含 `taskName, buildingId, unitId?, cycle, assignee?, deadline?, creator?, lockerIds?`；`lockerIds` 仍会按范围和正常状态二次过滤
 - `GET  /api/inspections?status=&keyword=&overdue=&abnormal=`：分页任务列表，`status=INCOMPLETE` 表示未完成
 - `GET  /api/inspections/{id}` / `DELETE /api/inspections/{id}`：任务详情 / 删除
 - `GET  /api/inspections/{id}/records`：任务下逐台柜体的检查项明细

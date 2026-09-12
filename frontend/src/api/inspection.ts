@@ -44,6 +44,28 @@ export interface InspectionTask {
   overdue: boolean
 }
 
+export interface InspectionLockerOption {
+  id: number
+  lockerNo: string
+  compartmentCount: number
+  specType: string
+  specTypeName: string
+  buildingId: number
+  buildingName: string
+  unitId: number
+  unitName: string
+  floor: string | null
+}
+
+export interface InspectionScope {
+  buildingId: number
+  buildingName: string
+  unitId: number | null
+  unitName: string | null
+  totalLockers: number
+  lockers: InspectionLockerOption[]
+}
+
 export interface InspectionRecord {
   id: number
   taskId: number
@@ -101,6 +123,7 @@ export interface InspectionCreateRequest {
   assignee?: string
   deadline?: string | null
   creator?: string
+  lockerIds?: number[]
 }
 
 export interface IssueHandleRequest {
@@ -155,6 +178,12 @@ export const ISSUE_STATUS_NAME_MAP: Record<IssueStatusCode, string> = {
 }
 
 export const inspectionApi = {
+  getScope(buildingId: number, unitId?: number | null) {
+    return api.get<InspectionScope>('/inspections/scope', {
+      params: { buildingId, unitId: unitId || undefined }
+    })
+  },
+
   createTask(data: InspectionCreateRequest) {
     return api.post<InspectionTask>('/inspections', data)
   },

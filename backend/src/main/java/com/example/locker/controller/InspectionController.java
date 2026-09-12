@@ -35,6 +35,13 @@ public class InspectionController {
         return ResponseEntity.ok(inspectionService.getTasks(page, size, status, keyword, overdue, abnormal));
     }
 
+    @GetMapping("/scope")
+    public ResponseEntity<InspectionScopeDTO> getScope(
+            @RequestParam Long buildingId,
+            @RequestParam(required = false) Long unitId) {
+        return ResponseEntity.ok(inspectionService.getScope(buildingId, unitId));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<InspectionTaskDTO> getTask(@PathVariable Long id) {
         return ResponseEntity.ok(inspectionService.getTask(id));

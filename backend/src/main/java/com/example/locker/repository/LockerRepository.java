@@ -1,6 +1,7 @@
 package com.example.locker.repository;
 
 import com.example.locker.entity.Locker;
+import com.example.locker.enums.LockerStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -18,7 +19,11 @@ public interface LockerRepository extends JpaRepository<Locker, Long>, JpaSpecif
 
     List<Locker> findByBuildingId(Long buildingId);
 
+    List<Locker> findByBuildingIdAndStatus(Long buildingId, LockerStatus status);
+
     List<Locker> findByUnitId(Long unitId);
+
+    List<Locker> findByUnitIdAndStatus(Long unitId, LockerStatus status);
 
     long countByBuildingId(Long buildingId);
 

@@ -77,10 +77,9 @@ public class InspectionService {
             throw new IllegalArgumentException(e.getMessage());
         }
 
-        List<Locker> lockers = lockersInScope(building.getId(),
-                unit == null ? null : unit.getId());
+        List<Locker> lockers = lockersInScope(building, unit, request.getLockerIds());
         if (lockers.isEmpty()) {
-            throw new IllegalArgumentException("所选楼栋/单元下暂无快递柜，无法发起巡检任务");
+            throw new IllegalArgumentException("所选楼栋/单元下暂无可巡检的正常快递柜，无法发起巡检任务");
         }
 
         InspectionTask task = new InspectionTask();
@@ -108,6 +107,35 @@ public class InspectionService {
         }
 
         return toTaskDTO(saved);
+    }
+
+    /**
+     * 实时计算发起巡检时的可选柜体范围；停用柜档案仍可在柜体档案中查看，但不进入巡检范围。
+     */
+    public InspectionScopeDTO getScope(Long buildingId, Long unitId) {
+        if (buildingId == null) {
+            throw new IllegalArgumentException("请选择巡检楼栋");
+        }
+        Building building = buildingRepository.findById(buildingId).orElseThrow(() ->
+                new IllegalArgumentException("楼栋不存在: " + buildingId));
+        Unit unit = null;
+        if (unitId != null) {
+            unit = unitRepository.findById(unitId).orElseThrow(() ->
+                    new IllegalArgumentException("单元不存在: " + unitId));
+            if (!unit.getBuildingId().equals(building.getId())) {
+                throw new IllegalArgumentException("所选单元不属于该楼栋");
+            }
+        }
+
+        List<Locker> lockers = lockersInScope(building, unit, null);
+        InspectionScopeDTO dto = new InspectionScopeDTO();
+        dto.setBuildingId(building.getId());
+        dto.setBuildingName(building.getName());
+        dto.setUnitId(unit == null ? null : unit.getId());
+        dto.setUnitName(unit == null ? null : unit.getName());
+        dto.setTotalLockers(lockers.size());
+        dto.setLockers(lockers.stream().map(this::toLockerOption).collect(Collectors.toList()));
+        return dto;
     }
 
     public PageResponse<InspectionTaskDTO> getTasks(Integer page, Integer size, String status,
@@ -558,11 +586,47 @@ public class InspectionService {
         return dto;
     }
 
-    private List<Locker> lockersInScope(Long buildingId, Long unitId) {
-        if (unitId != null) {
-            return lockerRepository.findByUnitId(unitId);
+    /**
+     * 巡检范围只冻结发起时刻状态为 ACTIVE 的柜体。调用方即使强行传入停用柜 ID，
+     * 也会在范围、状态两道条件中被过滤，不能生成巡检明细。
+     */
+    private List<Locker> lockersInScope(Building building, Unit unit, List<Long> lockerIds) {
+        List<Locker> lockers = (unit == null
+                ? lockerRepository.findByBuildingIdAndStatus(building.getId(), LockerStatus.ACTIVE)
+                : lockerRepository.findByUnitIdAndStatus(unit.getId(), LockerStatus.ACTIVE)).stream()
+                .filter(locker -> locker.getStatus() == LockerStatus.ACTIVE)
+                .collect(Collectors.toList());
+
+        if (lockerIds == null || lockerIds.isEmpty()) {
+            return lockers;
         }
-        return lockerRepository.findByBuildingId(buildingId);
+
+        Set<Long> requestedIds = lockerIds.stream()
+                .filter(Objects::nonNull)
+                .collect(Collectors.toSet());
+        if (requestedIds.isEmpty()) {
+            return lockers;
+        }
+        return lockers.stream()
+                .filter(locker -> requestedIds.contains(locker.getId()))
+                .collect(Collectors.toList());
+    }
+
+    private InspectionLockerOptionDTO toLockerOption(Locker locker) {
+        InspectionLockerOptionDTO dto = new InspectionLockerOptionDTO();
+        dto.setId(locker.getId());
+        dto.setLockerNo(locker.getLockerNo());
+        dto.setCompartmentCount(locker.getCompartmentCount());
+        dto.setSpecType(locker.getSpecType());
+        dto.setSpecTypeName(specTemplateService.getSpecTypeName(locker.getSpecType()));
+        dto.setBuildingId(locker.getBuildingId());
+        dto.setUnitId(locker.getUnitId());
+        dto.setFloor(locker.getFloor());
+        buildingRepository.findById(locker.getBuildingId())
+                .ifPresent(building -> dto.setBuildingName(building.getName()));
+        unitRepository.findById(locker.getUnitId())
+                .ifPresent(unit -> dto.setUnitName(unit.getName()));
+        return dto;
     }
 
     private CheckResult parseResult(String code) {

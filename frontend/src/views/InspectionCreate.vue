@@ -10,7 +10,9 @@ import type {
   BuildingTreeDTO,
   UnitDTO,
   InspectionCycleCode,
-  InspectionCreateRequest
+  InspectionCreateRequest,
+  InspectionScope,
+  InspectionLockerOption
 } from '@/api/inspection'
 import { ElMessage } from 'element-plus'
 
@@ -18,6 +20,10 @@ const router = useRouter()
 
 const buildingTree = ref<BuildingTreeDTO[]>([])
 const units = ref<UnitDTO[]>([])
+const scope = ref<InspectionScope | null>(null)
+const scopeLockers = ref<InspectionLockerOption[]>([])
+const scopeLoading = ref(false)
+let scopeRequestSeq = 0
 const submitting = ref(false)
 
 const cycleOptions = Object.entries(CYCLE_NAME_MAP).map(([value, label]) => ({
@@ -47,15 +53,62 @@ onMounted(async () => {
   }
 })
 
+const resetScope = () => {
+  scopeRequestSeq++
+  scopeLoading.value = false
+  scope.value = null
+  scopeLockers.value = []
+}
+
+const loadScope = async (buildingId: number, unitId: number | null = null) => {
+  if (!buildingId) {
+    resetScope()
+    return
+  }
+  const requestSeq = ++scopeRequestSeq
+  scopeLoading.value = true
+  try {
+    const res = await inspectionApi.getScope(buildingId, unitId)
+    if (requestSeq !== scopeRequestSeq) return
+    scope.value = res.data
+    scopeLockers.value = res.data.lockers
+  } catch (error: any) {
+    if (requestSeq !== scopeRequestSeq) return
+    resetScope()
+    ElMessage.error(error.response?.data?.message || '获取可巡检柜体范围失败')
+  } finally {
+    if (requestSeq === scopeRequestSeq) {
+      scopeLoading.value = false
+    }
+  }
+}
+
 const handleBuildingChange = async (buildingId: number) => {
   form.value.unitId = null
   units.value = []
+  resetScope()
   if (!buildingId) return
   try {
-    const res = await buildingApi.getUnitsByBuilding(buildingId)
-    units.value = res.data
+    const [unitResult, scopeResult] = await Promise.allSettled([
+      buildingApi.getUnitsByBuilding(buildingId),
+      loadScope(buildingId)
+    ])
+    if (unitResult.status === 'fulfilled') {
+      units.value = unitResult.value.data
+    } else {
+      console.error('获取单元失败', unitResult.reason)
+    }
+    if (scopeResult.status === 'rejected') {
+      console.error('获取可巡检范围失败', scopeResult.reason)
+    }
   } catch (error) {
     console.error('获取单元失败', error)
+  }
+}
+
+const handleUnitChange = (unitId: number | null) => {
+  if (form.value.buildingId) {
+    loadScope(form.value.buildingId, unitId || null)
   }
 }
 
@@ -66,6 +119,14 @@ const handleSubmit = async () => {
   }
   if (!form.value.buildingId) {
     ElMessage.warning('请选择巡检楼栋')
+    return
+  }
+  if (scopeLoading.value) {
+    ElMessage.warning('可巡检范围正在刷新，请稍后再提交')
+    return
+  }
+  if (!scope.value || scope.value.totalLockers === 0) {
+    ElMessage.warning('所选范围内暂无可巡检的正常快递柜')
     return
   }
   if (!form.value.assignee?.trim()) {
@@ -79,6 +140,7 @@ const handleSubmit = async () => {
     unitId: form.value.unitId || null,
     assignee: form.value.assignee.trim(),
     creator: form.value.creator?.trim() || undefined,
+    lockerIds: scopeLockers.value.map((locker) => locker.id),
     deadline: deadlineDate.value ? toLocalIso(deadlineDate.value) : null
   }
 
@@ -141,10 +203,11 @@ const toLocalIso = (d: Date) => {
         <el-form-item label="巡检单元">
           <el-select
             v-model="form.unitId"
-            placeholder="不选则巡检整栋楼的所有快递柜"
+            placeholder="不选则巡检整栋楼的正常快递柜"
             clearable
             style="width: 100%"
             :disabled="!form.buildingId"
+            @change="handleUnitChange"
           >
             <el-option
               v-for="u in units"
@@ -153,7 +216,25 @@ const toLocalIso = (d: Date) => {
               :value="u.id"
             />
           </el-select>
-          <div class="form-tip">不选择单元时，将纳入该楼栋下全部快递柜逐台巡检。</div>
+          <el-table
+            v-if="form.buildingId"
+            v-loading="scopeLoading"
+            :data="scopeLockers"
+            size="small"
+            border
+            style="margin-top: 8px; width: 100%"
+          >
+            <el-table-column prop="lockerNo" label="柜体编号" min-width="130" />
+            <el-table-column prop="unitName" label="单元" min-width="100" />
+            <el-table-column prop="floor" label="楼层" min-width="80" />
+            <el-table-column prop="specTypeName" label="规格" min-width="100" />
+            <el-table-column prop="compartmentCount" label="格口数" width="90" align="right" />
+            <template #empty>暂无可巡检的正常快递柜</template>
+          </el-table>
+          <div class="form-tip">
+            不选择单元时，将纳入该楼栋下全部正常快递柜逐台巡检；临时停用、永久停用柜不会纳入新任务。
+            <template v-if="scope">当前应检 <strong>{{ scope.totalLockers }}</strong> 台。</template>
+          </div>
         </el-form-item>
 
         <el-form-item label="巡检周期" required>
@@ -186,7 +267,12 @@ const toLocalIso = (d: Date) => {
         </el-form-item>
 
         <el-form-item>
-          <el-button type="primary" :loading="submitting" @click="handleSubmit">发起任务</el-button>
+          <el-button
+            type="primary"
+            :loading="submitting"
+            :disabled="scopeLoading || !scope?.totalLockers"
+            @click="handleSubmit"
+          >发起任务</el-button>
           <el-button @click="handleCancel">取消</el-button>
         </el-form-item>
       </el-form>
