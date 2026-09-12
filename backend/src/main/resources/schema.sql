@@ -158,6 +158,26 @@ CREATE TABLE IF NOT EXISTS clearance_order (
     FOREIGN KEY (locker_id) REFERENCES locker(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='滞留件清柜单表';
 
+-- 当面催领台账：办理中的清柜单可逐笔登记催领时间与经办人；
+-- 同一张单同时只能挂一笔未关闭催领（函数唯一索引兜底，已关闭记录不占额度），
+-- 单据办结时未关闭催领在同一事务内自动关闭。
+CREATE TABLE IF NOT EXISTS clearance_urge_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    order_id BIGINT NOT NULL COMMENT '清柜单ID',
+    urge_time DATETIME NOT NULL COMMENT '催领时间',
+    operator VARCHAR(50) NOT NULL COMMENT '经办人(当面催领人)',
+    status VARCHAR(20) NOT NULL DEFAULT 'OPEN' COMMENT '催领状态: OPEN-未关闭, CLOSED-已关闭',
+    close_note TEXT COMMENT '关闭说明',
+    close_operator VARCHAR(50) COMMENT '关闭经办人',
+    close_time DATETIME COMMENT '关闭时间',
+    auto_closed TINYINT(1) NOT NULL DEFAULT 0 COMMENT '办结时系统自动关闭: 1-是, 0-否',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_clearance_urge_order (order_id),
+    INDEX idx_clearance_urge_status (status),
+    UNIQUE KEY uk_clearance_urge_open ((CASE WHEN status = 'OPEN' THEN order_id END)),
+    FOREIGN KEY (order_id) REFERENCES clearance_order(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='清柜单当面催领记录表';
+
 CREATE TABLE IF NOT EXISTS key_borrow_record (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     record_no VARCHAR(40) NOT NULL UNIQUE COMMENT '借用台账编号',

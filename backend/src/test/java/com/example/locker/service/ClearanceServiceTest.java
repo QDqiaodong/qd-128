@@ -3,13 +3,19 @@ package com.example.locker.service;
 import com.example.locker.dto.ClearanceCompleteRequest;
 import com.example.locker.dto.ClearanceOrderCreateRequest;
 import com.example.locker.dto.ClearanceOrderDTO;
+import com.example.locker.dto.ClearanceUrgeCloseRequest;
+import com.example.locker.dto.ClearanceUrgeCreateRequest;
+import com.example.locker.dto.ClearanceUrgeRecordDTO;
 import com.example.locker.dto.LockerClearanceOverviewDTO;
 import com.example.locker.entity.ClearanceOrder;
+import com.example.locker.entity.ClearanceUrgeRecord;
 import com.example.locker.entity.Locker;
 import com.example.locker.enums.ClearanceStatus;
+import com.example.locker.enums.ClearanceUrgeStatus;
 import com.example.locker.enums.LockerStatus;
 import com.example.locker.repository.BuildingRepository;
 import com.example.locker.repository.ClearanceOrderRepository;
+import com.example.locker.repository.ClearanceUrgeRecordRepository;
 import com.example.locker.repository.LockerRepository;
 import com.example.locker.repository.UnitRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +49,9 @@ class ClearanceServiceTest {
 
     @Mock
     private UnitRepository unitRepository;
+
+    @Mock
+    private ClearanceUrgeRecordRepository urgeRepository;
 
     @InjectMocks
     private ClearanceService clearanceService;
@@ -145,9 +154,11 @@ class ClearanceServiceTest {
         order.setId(1L);
         order.setLockerId(1L);
         order.setStatus(ClearanceStatus.PROCESSING);
-        when(clearanceOrderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(clearanceOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
         when(clearanceOrderRepository.save(any(ClearanceOrder.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
+        when(urgeRepository.findByOrderIdOrderByUrgeTimeDescIdDesc(1L))
+                .thenReturn(Collections.emptyList());
         when(lockerRepository.findById(1L)).thenReturn(Optional.of(locker));
 
         ClearanceCompleteRequest request = new ClearanceCompleteRequest();
@@ -165,13 +176,186 @@ class ClearanceServiceTest {
         ClearanceOrder order = new ClearanceOrder();
         order.setId(1L);
         order.setStatus(ClearanceStatus.COMPLETED);
-        when(clearanceOrderRepository.findById(1L)).thenReturn(Optional.of(order));
+        when(clearanceOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
 
         ClearanceCompleteRequest request = new ClearanceCompleteRequest();
         request.setHandleResult("重复办结");
         assertThrows(IllegalArgumentException.class,
                 () -> clearanceService.completeOrder(1L, request));
         verify(clearanceOrderRepository, never()).save(any(ClearanceOrder.class));
+    }
+
+    @Test
+    void completeOrderAutoClosesOpenUrgeInSameTransaction() {
+        // 办结时未关闭催领必须在同一事务内自动关闭，刷新后不能出现「已办结却催领中」
+        ClearanceOrder order = new ClearanceOrder();
+        order.setId(1L);
+        order.setLockerId(1L);
+        order.setStatus(ClearanceStatus.PROCESSING);
+        when(clearanceOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+        when(clearanceOrderRepository.save(any(ClearanceOrder.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ClearanceUrgeRecord openUrge = new ClearanceUrgeRecord();
+        openUrge.setId(10L);
+        openUrge.setOrderId(1L);
+        openUrge.setStatus(ClearanceUrgeStatus.OPEN);
+        when(urgeRepository.findByOrderIdOrderByUrgeTimeDescIdDesc(1L))
+                .thenReturn(List.of(openUrge));
+        when(lockerRepository.findById(1L)).thenReturn(Optional.of(locker));
+
+        ClearanceCompleteRequest request = new ClearanceCompleteRequest();
+        request.setHandleResult("业主已取走，格口清空");
+        ClearanceOrderDTO dto = clearanceService.completeOrder(1L, request);
+
+        assertEquals(ClearanceStatus.COMPLETED, dto.getStatus());
+        assertEquals(ClearanceUrgeStatus.CLOSED, openUrge.getStatus());
+        assertTrue(openUrge.getAutoClosed());
+        assertNotNull(openUrge.getCloseTime());
+        verify(urgeRepository).save(openUrge);
+    }
+
+    @Test
+    void createUrgePersistsOpenRecordWithTimeAndOperator() {
+        ClearanceOrder order = processingOrder();
+        when(clearanceOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+        when(urgeRepository.findFirstByOrderIdAndStatusOrderByIdAsc(1L, ClearanceUrgeStatus.OPEN))
+                .thenReturn(Optional.empty());
+        when(urgeRepository.save(any(ClearanceUrgeRecord.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ClearanceUrgeCreateRequest request = new ClearanceUrgeCreateRequest();
+        request.setUrgeTime(LocalDateTime.now().minusMinutes(10));
+        request.setOperator("赵管家");
+        ClearanceUrgeRecordDTO dto = clearanceService.createUrge(1L, request);
+
+        assertEquals(ClearanceUrgeStatus.OPEN.name(), dto.getStatus());
+        assertEquals("赵管家", dto.getOperator());
+        assertNotNull(dto.getUrgeTime());
+        verify(urgeRepository, times(1)).save(any(ClearanceUrgeRecord.class));
+    }
+
+    @Test
+    void createUrgeDefaultsUrgeTimeToNow() {
+        ClearanceOrder order = processingOrder();
+        when(clearanceOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+        when(urgeRepository.findFirstByOrderIdAndStatusOrderByIdAsc(1L, ClearanceUrgeStatus.OPEN))
+                .thenReturn(Optional.empty());
+        when(urgeRepository.save(any(ClearanceUrgeRecord.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ClearanceUrgeCreateRequest request = new ClearanceUrgeCreateRequest();
+        request.setOperator("赵管家");
+        ClearanceUrgeRecordDTO dto = clearanceService.createUrge(1L, request);
+
+        assertNotNull(dto.getUrgeTime());
+    }
+
+    @Test
+    void createUrgeRejectedWhenAnotherOpenUrgeExists() {
+        // 同一张办理中的单不能同时挂两笔未关闭催领
+        ClearanceOrder order = processingOrder();
+        when(clearanceOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+        ClearanceUrgeRecord openUrge = new ClearanceUrgeRecord();
+        openUrge.setId(10L);
+        openUrge.setOrderId(1L);
+        openUrge.setStatus(ClearanceUrgeStatus.OPEN);
+        when(urgeRepository.findFirstByOrderIdAndStatusOrderByIdAsc(1L, ClearanceUrgeStatus.OPEN))
+                .thenReturn(Optional.of(openUrge));
+
+        ClearanceUrgeCreateRequest request = new ClearanceUrgeCreateRequest();
+        request.setOperator("赵管家");
+        assertThrows(IllegalArgumentException.class, () -> clearanceService.createUrge(1L, request));
+        // 拦截后不能写出半条
+        verify(urgeRepository, never()).save(any(ClearanceUrgeRecord.class));
+    }
+
+    @Test
+    void createUrgeRejectedForCompletedOrder() {
+        ClearanceOrder order = processingOrder();
+        order.setStatus(ClearanceStatus.COMPLETED);
+        when(clearanceOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+
+        ClearanceUrgeCreateRequest request = new ClearanceUrgeCreateRequest();
+        request.setOperator("赵管家");
+        assertThrows(IllegalArgumentException.class, () -> clearanceService.createUrge(1L, request));
+        verify(urgeRepository, never()).save(any(ClearanceUrgeRecord.class));
+    }
+
+    @Test
+    void createUrgeRejectsMissingOperatorAndFutureTime() {
+        ClearanceOrder order = processingOrder();
+        when(clearanceOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+
+        ClearanceUrgeCreateRequest noOperator = new ClearanceUrgeCreateRequest();
+        assertThrows(IllegalArgumentException.class, () -> clearanceService.createUrge(1L, noOperator));
+
+        ClearanceUrgeCreateRequest future = new ClearanceUrgeCreateRequest();
+        future.setOperator("赵管家");
+        future.setUrgeTime(LocalDateTime.now().plusHours(1));
+        assertThrows(IllegalArgumentException.class, () -> clearanceService.createUrge(1L, future));
+
+        verify(urgeRepository, never()).save(any(ClearanceUrgeRecord.class));
+    }
+
+    @Test
+    void closeUrgeClosesRecordAndAllowsNextUrge() {
+        // 关闭后再记一笔：同一时刻只有一笔未关闭，但次数累计
+        ClearanceOrder order = processingOrder();
+        when(clearanceOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+
+        ClearanceUrgeRecord openUrge = new ClearanceUrgeRecord();
+        openUrge.setId(10L);
+        openUrge.setOrderId(1L);
+        openUrge.setStatus(ClearanceUrgeStatus.OPEN);
+        when(urgeRepository.findById(10L)).thenReturn(Optional.of(openUrge));
+        when(urgeRepository.save(any(ClearanceUrgeRecord.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+
+        ClearanceUrgeCloseRequest closeRequest = new ClearanceUrgeCloseRequest();
+        closeRequest.setCloseNote("业主承诺明天取件");
+        ClearanceUrgeRecordDTO closed = clearanceService.closeUrge(1L, 10L, closeRequest);
+
+        assertEquals(ClearanceUrgeStatus.CLOSED.name(), closed.getStatus());
+        assertEquals("业主承诺明天取件", closed.getCloseNote());
+        assertNotNull(closed.getCloseTime());
+        assertFalse(closed.getAutoClosed());
+
+        // 关闭后无未关闭催领，允许再登记
+        when(urgeRepository.findFirstByOrderIdAndStatusOrderByIdAsc(1L, ClearanceUrgeStatus.OPEN))
+                .thenReturn(Optional.empty());
+        ClearanceUrgeCreateRequest next = new ClearanceUrgeCreateRequest();
+        next.setOperator("钱管家");
+        clearanceService.createUrge(1L, next);
+        verify(urgeRepository, times(2)).save(any(ClearanceUrgeRecord.class));
+    }
+
+    @Test
+    void closeUrgeRejectsAlreadyClosed() {
+        ClearanceOrder order = processingOrder();
+        when(clearanceOrderRepository.findByIdForUpdate(1L)).thenReturn(Optional.of(order));
+        ClearanceUrgeRecord closed = new ClearanceUrgeRecord();
+        closed.setId(10L);
+        closed.setOrderId(1L);
+        closed.setStatus(ClearanceUrgeStatus.CLOSED);
+        when(urgeRepository.findById(10L)).thenReturn(Optional.of(closed));
+
+        assertThrows(IllegalArgumentException.class,
+                () -> clearanceService.closeUrge(1L, 10L, new ClearanceUrgeCloseRequest()));
+        verify(urgeRepository, never()).save(any(ClearanceUrgeRecord.class));
+    }
+
+    private ClearanceOrder processingOrder() {
+        ClearanceOrder order = new ClearanceOrder();
+        order.setId(1L);
+        order.setLockerId(1L);
+        order.setOrderNo("QG20260901001");
+        order.setOverdueCompartments("A03");
+        order.setPackageCount(1);
+        order.setFoundTime(LocalDateTime.now().minusDays(2));
+        order.setHandler("张师傅");
+        order.setStatus(ClearanceStatus.PROCESSING);
+        return order;
     }
 
     @Test

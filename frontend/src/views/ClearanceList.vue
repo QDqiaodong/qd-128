@@ -7,7 +7,8 @@ import type {
   ClearanceLockerOption,
   LockerClearanceOverview,
   ClearanceStatusCode,
-  ClearanceOrderCreateRequest
+  ClearanceOrderCreateRequest,
+  ClearanceUrgeRecord
 } from '@/api/clearance'
 
 // ---------------- 清柜单列表 ----------------
@@ -229,6 +230,157 @@ const submitComplete = async () => {
   }
 }
 
+// ---------------- 当面催领 ----------------
+
+const urgeDialogVisible = ref(false)
+const urgeLoading = ref(false)
+const urgeSubmitting = ref(false)
+const urgeOrder = ref<ClearanceOrder | null>(null)
+const urgeRecords = ref<ClearanceUrgeRecord[]>([])
+const urgeForm = ref<{ urgeTime: string | null; operator: string }>(emptyUrgeForm())
+const closeForm = ref<{ closeNote: string; closeOperator: string }>(emptyCloseForm())
+
+function emptyUrgeForm() {
+  return {
+    // 默认当前时间，格式与后端 LocalDateTime 对齐
+    urgeTime: formatLocalDateTime(new Date()),
+    operator: ''
+  }
+}
+
+function emptyCloseForm() {
+  return { closeNote: '', closeOperator: '' }
+}
+
+/** 当前未关闭催领（同一张办理中的单同时最多一笔） */
+const openUrgeRecord = computed(() =>
+  urgeRecords.value.find((r) => r.status === 'OPEN') || null
+)
+
+const urgeFormDirty = computed(
+  () =>
+    !!urgeForm.value.operator.trim() ||
+    !!closeForm.value.closeNote.trim() ||
+    !!closeForm.value.closeOperator.trim()
+)
+
+/** 当前时间按本地时区格式化为 yyyy-MM-ddTHH:mm:ss，供 el-date-picker value-format 使用 */
+function formatLocalDateTime(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  )
+}
+
+const openUrgeDialog = async (order: ClearanceOrder) => {
+  urgeOrder.value = order
+  urgeForm.value = emptyUrgeForm()
+  closeForm.value = emptyCloseForm()
+  urgeRecords.value = []
+  urgeDialogVisible.value = true
+  urgeLoading.value = true
+  try {
+    const res = await clearanceApi.getUrges(order.id)
+    urgeRecords.value = res.data
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '获取催领记录失败')
+  } finally {
+    urgeLoading.value = false
+  }
+}
+
+/**
+ * 催领内容只保存在本窗口内，未提交前关闭不会写入任何数据；
+ * 已填写经办人时关闭需二次确认，关掉窗口不会写出半条催领。
+ */
+const handleUrgeDialogClose = (done: () => void) => {
+  if (!urgeFormDirty.value) {
+    done()
+    return
+  }
+  ElMessageBox.confirm('关闭后本次填写的催领内容将丢弃，且不会生成催领记录，确认关闭？', '提示', {
+    type: 'warning',
+    confirmButtonText: '丢弃并关闭',
+    cancelButtonText: '继续填写'
+  })
+    .then(() => done())
+    .catch(() => {})
+}
+
+const submitUrge = async () => {
+  if (!urgeOrder.value) return
+  if (!urgeForm.value.urgeTime) {
+    ElMessage.warning('请选择催领时间')
+    return
+  }
+  if (!urgeForm.value.operator.trim()) {
+    ElMessage.warning('请填写经办人')
+    return
+  }
+  urgeSubmitting.value = true
+  try {
+    await clearanceApi.createUrge(urgeOrder.value.id, {
+      urgeTime: urgeForm.value.urgeTime,
+      operator: urgeForm.value.operator.trim()
+    })
+    ElMessage.success('当面催领已登记')
+    urgeForm.value = emptyUrgeForm()
+    closeForm.value = emptyCloseForm()
+    await refreshUrges()
+    await fetchOrders()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '登记催领失败')
+  } finally {
+    urgeSubmitting.value = false
+  }
+}
+
+const submitCloseUrge = async () => {
+  const open = openUrgeRecord.value
+  if (!open || !urgeOrder.value) return
+  try {
+    await ElMessageBox.confirm(
+      '关闭后该单可再登记下一笔当面催领，确认关闭当前未关闭催领？',
+      '关闭催领',
+      { type: 'warning', confirmButtonText: '确认关闭' }
+    )
+  } catch {
+    return
+  }
+  urgeSubmitting.value = true
+  try {
+    await clearanceApi.closeUrge(open.id, {
+      closeNote: closeForm.value.closeNote.trim() || undefined,
+      closeOperator: closeForm.value.closeOperator.trim() || undefined
+    })
+    ElMessage.success('催领已关闭')
+    closeForm.value = emptyCloseForm()
+    await refreshUrges()
+    await fetchOrders()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '关闭催领失败')
+  } finally {
+    urgeSubmitting.value = false
+  }
+}
+
+/** 提交/关闭后全部以后端台账为准刷新，次数与未关闭标记保持对得上 */
+const refreshUrges = async () => {
+  if (!urgeOrder.value) return
+  try {
+    const res = await clearanceApi.getUrges(urgeOrder.value.id)
+    urgeRecords.value = res.data
+    // 若详情抽屉正展示同一张单，同步刷新抽屉里的台账与次数
+    if (detailDrawerVisible.value && detailOrder.value?.id === urgeOrder.value.id) {
+      const detailRes = await clearanceApi.getOrder(urgeOrder.value.id)
+      detailOrder.value = detailRes.data
+    }
+  } catch (error) {
+    console.error('刷新催领记录失败', error)
+  }
+}
+
 // ---------------- 详情 ----------------
 
 const detailDrawerVisible = ref(false)
@@ -318,12 +470,28 @@ onMounted(() => {
             <el-tag v-else type="success">已办结</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="催领" width="110" align="center">
+          <template #default="{ row }">
+            <span v-if="row.urgeCount > 0">
+              <el-tag v-if="row.openUrge" type="warning" size="small">催领中</el-tag>
+              <span v-else>{{ row.urgeCount }} 次</span>
+            </span>
+            <span v-else class="muted-text">-</span>
+          </template>
+        </el-table-column>
         <el-table-column label="办结时间" width="160">
           <template #default="{ row }">{{ formatTime(row.completeTime) }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="150" fixed="right">
+        <el-table-column label="操作" width="230" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="openDetail(row)">详情</el-button>
+            <el-button
+              v-if="row.status === 'PROCESSING'"
+              size="small"
+              type="primary"
+              plain
+              @click="openUrgeDialog(row)"
+            >当面催领</el-button>
             <el-button
               v-if="row.status === 'PROCESSING'"
               size="small"
@@ -486,6 +654,129 @@ onMounted(() => {
       </template>
     </el-dialog>
 
+    <!-- ================= 当面催领弹窗 ================= -->
+    <el-dialog
+      title="当面催领"
+      v-model="urgeDialogVisible"
+      width="600px"
+      :close-on-click-modal="false"
+      :before-close="handleUrgeDialogClose"
+    >
+      <template v-if="urgeOrder">
+        <el-descriptions :column="2" border class="dialog-tip">
+          <el-descriptions-item label="清柜单号">{{ urgeOrder.orderNo }}</el-descriptions-item>
+          <el-descriptions-item label="柜体">{{ urgeOrder.lockerNo }}</el-descriptions-item>
+          <el-descriptions-item label="滞留格口">{{ urgeOrder.overdueCompartments }}</el-descriptions-item>
+          <el-descriptions-item label="件数">{{ urgeOrder.packageCount }}</el-descriptions-item>
+        </el-descriptions>
+
+        <el-alert
+          v-if="openUrgeRecord"
+          type="warning"
+          :closable="false"
+          class="dialog-tip"
+          title="该单已有一笔未关闭催领，不能同时再挂第二笔；关闭后可再登记。"
+        />
+
+        <div v-loading="urgeLoading">
+          <!-- 已有未关闭催领：展示并可关闭，不能再登记 -->
+          <template v-if="openUrgeRecord">
+            <el-descriptions :column="1" border>
+              <el-descriptions-item label="催领时间">
+                {{ formatTime(openUrgeRecord.urgeTime) }}
+              </el-descriptions-item>
+              <el-descriptions-item label="经办人">
+                {{ openUrgeRecord.operator }}
+              </el-descriptions-item>
+              <el-descriptions-item label="状态">
+                <el-tag type="warning" size="small">未关闭</el-tag>
+              </el-descriptions-item>
+            </el-descriptions>
+            <el-form label-width="90px" class="urge-close-form">
+              <el-form-item label="关闭说明">
+                <el-input
+                  v-model="closeForm.closeNote"
+                  type="textarea"
+                  :rows="2"
+                  placeholder="选填，如：业主承诺明日取件"
+                />
+              </el-form-item>
+              <el-form-item label="关闭经办人">
+                <el-input v-model="closeForm.closeOperator" placeholder="选填，默认系统管理员" />
+              </el-form-item>
+            </el-form>
+          </template>
+
+          <!-- 无未关闭催领：登记新一笔（内容仅存于本窗口，提交后才落库） -->
+          <el-form v-else label-width="90px">
+            <el-form-item label="催领时间" required>
+              <el-date-picker
+                v-model="urgeForm.urgeTime"
+                type="datetime"
+                placeholder="请选择催领时间"
+                format="YYYY-MM-DD HH:mm"
+                value-format="YYYY-MM-DD[T]HH:mm:ss"
+                :disabled-date="disableFutureDate"
+                style="width: 100%"
+              />
+            </el-form-item>
+            <el-form-item label="经办人" required>
+              <el-input v-model="urgeForm.operator" placeholder="请填写当面催领的经办人" />
+            </el-form-item>
+          </el-form>
+
+          <div class="urge-history">
+            <div class="urge-history-title">
+              催领台账（共 {{ urgeRecords.length }} 笔）
+            </div>
+            <el-table :data="urgeRecords" border size="small">
+              <el-table-column label="催领时间" width="150">
+                <template #default="{ row }">{{ formatTime(row.urgeTime) }}</template>
+              </el-table-column>
+              <el-table-column prop="operator" label="经办人" width="90" />
+              <el-table-column label="状态" width="90">
+                <template #default="{ row }">
+                  <el-tag v-if="row.status === 'OPEN'" type="warning" size="small">未关闭</el-tag>
+                  <el-tag v-else type="info" size="small">已关闭</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="关闭时间" width="150">
+                <template #default="{ row }">{{ formatTime(row.closeTime) }}</template>
+              </el-table-column>
+              <el-table-column label="关闭说明/经办人" min-width="140" show-overflow-tooltip>
+                <template #default="{ row }">
+                  <span v-if="row.status === 'CLOSED'">
+                    {{ row.closeNote || (row.autoClosed ? '办结自动关闭' : '-') }}
+                    <span class="muted-text">（{{ row.closeOperator || '系统管理员' }}）</span>
+                  </span>
+                  <span v-else class="muted-text">-</span>
+                </template>
+              </el-table-column>
+            </el-table>
+            <div v-if="!urgeLoading && urgeRecords.length === 0" class="urge-empty">
+              暂无催领记录
+            </div>
+          </div>
+        </div>
+      </template>
+      <template #footer>
+        <el-button @click="handleUrgeDialogClose(() => (urgeDialogVisible = false))">取消</el-button>
+        <el-button
+          v-if="openUrgeRecord"
+          type="success"
+          :loading="urgeSubmitting"
+          @click="submitCloseUrge"
+        >关闭催领</el-button>
+        <el-button
+          v-else
+          type="primary"
+          :loading="urgeSubmitting"
+          :disabled="urgeLoading"
+          @click="submitUrge"
+        >提交催领</el-button>
+      </template>
+    </el-dialog>
+
     <!-- ================= 详情抽屉 ================= -->
     <el-drawer title="清柜单详情" v-model="detailDrawerVisible" size="480px">
       <el-descriptions v-if="detailOrder" :column="1" border>
@@ -493,6 +784,12 @@ onMounted(() => {
         <el-descriptions-item label="状态">
           <el-tag v-if="detailOrder.overdue" type="danger">滞留中</el-tag>
           <el-tag v-else type="success">已办结</el-tag>
+          <el-tag
+            v-if="detailOrder.openUrge"
+            type="warning"
+            size="small"
+            style="margin-left: 8px"
+          >催领中</el-tag>
         </el-descriptions-item>
         <el-descriptions-item label="柜体">
           {{ detailOrder.lockerNo }}
@@ -505,11 +802,44 @@ onMounted(() => {
         <el-descriptions-item label="滞留件数">{{ detailOrder.packageCount }} 件</el-descriptions-item>
         <el-descriptions-item label="发现时间">{{ formatTime(detailOrder.foundTime) }}</el-descriptions-item>
         <el-descriptions-item label="处理人">{{ detailOrder.handler }}</el-descriptions-item>
+        <el-descriptions-item label="催领次数">{{ detailOrder.urgeCount ?? 0 }} 次</el-descriptions-item>
         <el-descriptions-item label="处理结果">{{ detailOrder.handleResult || '-' }}</el-descriptions-item>
         <el-descriptions-item label="办结时间">{{ formatTime(detailOrder.completeTime) }}</el-descriptions-item>
         <el-descriptions-item label="备注">{{ detailOrder.remark || '-' }}</el-descriptions-item>
         <el-descriptions-item label="登记时间">{{ formatTime(detailOrder.createTime) }}</el-descriptions-item>
       </el-descriptions>
+
+      <div v-if="detailOrder" class="urge-history drawer-urge-history">
+        <div class="urge-history-title">当面催领台账</div>
+        <el-timeline v-if="(detailOrder.urgeRecords || []).length > 0">
+          <el-timeline-item
+            v-for="r in detailOrder.urgeRecords"
+            :key="r.id"
+            :type="r.status === 'OPEN' ? 'warning' : 'info'"
+            :timestamp="formatTime(r.urgeTime)"
+          >
+            <div>经办人：{{ r.operator }}</div>
+            <div>
+              状态：
+              <el-tag v-if="r.status === 'OPEN'" type="warning" size="small">未关闭</el-tag>
+              <el-tag v-else type="info" size="small">已关闭</el-tag>
+              <span v-if="r.status === 'CLOSED'" class="muted-text">
+                {{ formatTime(r.closeTime) }} · {{ r.closeOperator || '系统管理员' }}
+              </span>
+            </div>
+            <div v-if="r.closeNote" class="muted-text">{{ r.closeNote }}</div>
+          </el-timeline-item>
+        </el-timeline>
+        <div v-else class="urge-empty">暂无催领记录</div>
+        <el-button
+          v-if="detailOrder.status === 'PROCESSING'"
+          type="primary"
+          plain
+          size="small"
+          style="margin-top: 8px"
+          @click="openUrgeDialog(detailOrder)"
+        >登记当面催领</el-button>
+      </div>
     </el-drawer>
   </div>
 </template>
@@ -549,6 +879,35 @@ onMounted(() => {
   float: right;
   display: flex;
   gap: 4px;
+}
+
+.muted-text {
+  color: #999;
+  font-size: 12px;
+}
+
+.urge-close-form {
+  margin-top: 16px;
+}
+
+.urge-history {
+  margin-top: 20px;
+}
+
+.drawer-urge-history {
+  padding: 0 20px 20px;
+}
+
+.urge-history-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.urge-empty {
+  text-align: center;
+  color: #999;
+  font-size: 12px;
+  padding: 16px;
 }
 
 .empty-tip {

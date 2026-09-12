@@ -4,6 +4,7 @@ import com.example.locker.enums.ClearanceStatus;
 import lombok.Data;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 public class ClearanceOrderDTO {
@@ -31,4 +32,13 @@ public class ClearanceOrderDTO {
     private String remark;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
+
+    /** 累计催领次数（由催领台账实时统计） */
+    private Integer urgeCount;
+
+    /** 是否存在未关闭催领（办理中的单同一时刻最多一笔） */
+    private Boolean openUrge;
+
+    /** 当面催领台账（按催领时间倒序） */
+    private List<ClearanceUrgeRecordDTO> urgeRecords;
 }

@@ -9,6 +9,21 @@ const api = axios.create({
 // ---------------- 类型定义 ----------------
 
 export type ClearanceStatusCode = 'PROCESSING' | 'COMPLETED'
+export type ClearanceUrgeStatusCode = 'OPEN' | 'CLOSED'
+
+export interface ClearanceUrgeRecord {
+  id: number
+  orderId: number
+  urgeTime: string
+  operator: string
+  status: ClearanceUrgeStatusCode
+  statusName: string
+  closeNote: string | null
+  closeOperator: string | null
+  closeTime: string | null
+  autoClosed: boolean
+  createTime: string
+}
 
 export interface ClearanceOrder {
   id: number
@@ -33,6 +48,23 @@ export interface ClearanceOrder {
   remark: string | null
   createTime: string
   updateTime: string
+  /** 累计催领次数（由催领台账实时统计） */
+  urgeCount: number
+  /** 是否存在未关闭催领 */
+  openUrge: boolean
+  /** 当面催领台账（详情接口返回） */
+  urgeRecords?: ClearanceUrgeRecord[]
+}
+
+export interface ClearanceUrgeCreateRequest {
+  /** 本地时间 ISO（不含时区），后端按 LocalDateTime 解析；不填默认当前时间 */
+  urgeTime: string | null
+  operator: string
+}
+
+export interface ClearanceUrgeCloseRequest {
+  closeNote?: string
+  closeOperator?: string
 }
 
 export interface ClearanceLockerOption {
@@ -106,6 +138,18 @@ export const clearanceApi = {
 
   completeOrder(id: number, handleResult: string) {
     return api.post<ClearanceOrder>(`/clearances/${id}/complete`, { handleResult })
+  },
+
+  createUrge(orderId: number, data: ClearanceUrgeCreateRequest) {
+    return api.post<ClearanceUrgeRecord>(`/clearances/${orderId}/urges`, data)
+  },
+
+  closeUrge(urgeId: number, data?: ClearanceUrgeCloseRequest) {
+    return api.post<ClearanceUrgeRecord>(`/clearances/urges/${urgeId}/close`, data || {})
+  },
+
+  getUrges(orderId: number) {
+    return api.get<ClearanceUrgeRecord[]>(`/clearances/${orderId}/urges`)
   },
 
   getLockerOrders(lockerId: number) {

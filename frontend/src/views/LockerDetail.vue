@@ -341,6 +341,13 @@ const currentMonthReading = computed(() =>
             <el-tag v-else type="success">已办结</el-tag>
           </template>
         </el-table-column>
+        <el-table-column label="催领" width="100" align="center">
+          <template #default="{ row }">
+            <el-tag v-if="row.openUrge" type="warning" size="small">催领中</el-tag>
+            <span v-else-if="row.urgeCount > 0">{{ row.urgeCount }} 次</span>
+            <span v-else style="color: #999">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="handleResult" label="处理结果" min-width="160" show-overflow-tooltip>
           <template #default="{ row }">{{ row.handleResult || '-' }}</template>
         </el-table-column>
