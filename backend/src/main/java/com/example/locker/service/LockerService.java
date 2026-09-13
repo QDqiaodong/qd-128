@@ -6,17 +6,20 @@ import com.example.locker.entity.ClearanceOrder;
 import com.example.locker.entity.KeyBorrowRecord;
 import com.example.locker.entity.Locker;
 import com.example.locker.entity.MeterReadingRecord;
+import com.example.locker.entity.RepairTicket;
 import com.example.locker.entity.StatusChangeRecord;
 import com.example.locker.enums.ClearanceStatus;
 import com.example.locker.enums.KeyBorrowStatus;
 import com.example.locker.enums.LockerStatus;
 import com.example.locker.enums.MeterReadingStatus;
+import com.example.locker.enums.RepairStatus;
 import com.example.locker.repository.AdjustmentRecordRepository;
 import com.example.locker.repository.BuildingRepository;
 import com.example.locker.repository.ClearanceOrderRepository;
 import com.example.locker.repository.KeyBorrowRecordRepository;
 import com.example.locker.repository.LockerRepository;
 import com.example.locker.repository.MeterReadingRecordRepository;
+import com.example.locker.repository.RepairTicketRepository;
 import com.example.locker.repository.StatusChangeRecordRepository;
 import com.example.locker.repository.UnitRepository;
 import jakarta.persistence.criteria.Predicate;
@@ -66,6 +69,9 @@ public class LockerService {
 
     @Autowired
     private MeterReadingRecordRepository meterReadingRecordRepository;
+
+    @Autowired
+    private RepairTicketRepository repairTicketRepository;
 
     @Autowired
     private SpecTemplateService specTemplateService;
@@ -123,6 +129,7 @@ public class LockerService {
         fillClearanceInfo(dtoList);
         fillKeyBorrowInfo(dtoList);
         fillMeterReadingInfo(dtoList);
+        fillRepairInfo(dtoList);
         return new PageResponse<>(dtoList, lockerPage.getTotalElements(), page, size);
     }
 
@@ -133,6 +140,7 @@ public class LockerService {
         fillClearanceInfo(java.util.Collections.singletonList(dto));
         fillKeyBorrowInfo(java.util.Collections.singletonList(dto));
         fillMeterReadingInfo(java.util.Collections.singletonList(dto));
+        fillRepairInfo(java.util.Collections.singletonList(dto));
         return dto;
     }
 
@@ -195,6 +203,27 @@ public class LockerService {
                 .collect(Collectors.toSet());
         for (LockerDTO dto : dtos) {
             dto.setMeterReadThisMonth(readLockerIds.contains(dto.getId()));
+        }
+    }
+
+    /**
+     * 维修中标记与处理中报修条数实时由处理中的报修单推导，
+     * 报修台账是唯一数据源，保证刷新后柜体列表/详情的可用标记
+     * 与报修台账列表、柜详情报修条数保持一致。
+     */
+    private void fillRepairInfo(List<LockerDTO> dtos) {
+        if (dtos == null || dtos.isEmpty()) {
+            return;
+        }
+        List<Long> lockerIds = dtos.stream().map(LockerDTO::getId).collect(Collectors.toList());
+        Map<Long, List<RepairTicket>> openByLocker = repairTicketRepository
+                .findByLockerIdInAndStatus(lockerIds, RepairStatus.PROCESSING).stream()
+                .collect(Collectors.groupingBy(RepairTicket::getLockerId));
+        for (LockerDTO dto : dtos) {
+            List<RepairTicket> open = openByLocker.getOrDefault(dto.getId(),
+                    java.util.Collections.emptyList());
+            dto.setRepairing(!open.isEmpty());
+            dto.setOpenRepairCount(open.size());
         }
     }
 

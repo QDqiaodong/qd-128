@@ -10,6 +10,7 @@ import {
   AlarmClock,
   Key,
   Odometer,
+  Tools,
   Expand,
   Fold
 } from '@element-plus/icons-vue'
@@ -84,7 +85,11 @@ const handleMenuSelect = (index: string) => {
           <Odometer />
           <span>电表抄表</span>
         </el-menu-item>
-      </el-menu>
+        <el-menu-item index="/repairs">
+          <Tools />
+          <span>格口报修台账</span>
+        </el-menu-item>
+      </el-menu>>
     </el-aside>
     <el-container class="main-content">
       <el-header class="header">
@@ -103,6 +108,7 @@ const handleMenuSelect = (index: string) => {
           <template v-else-if="route.path === '/clearances'">滞留件清柜</template>
           <template v-else-if="route.path === '/key-borrows'">钥匙借用台账</template>
           <template v-else-if="route.path === '/meter-readings'">电表抄表</template>
+          <template v-else-if="route.path === '/repairs'">格口报修台账</template>
         </div>
         <div class="header-actions">
           <button class="collapse-btn" @click="collapsed = !collapsed">

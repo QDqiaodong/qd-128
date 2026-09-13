@@ -250,6 +250,29 @@ CREATE TABLE IF NOT EXISTS meter_reading_record (
     -- 同一柜同一自然月只允许一张未作废(有效)抄表单，由后端在登记事务内校验拦截
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜电表抄表单表';
 
+-- 格口报修台账：柜详情登记故障格口、故障现象和报修人后建单（处理中）；
+-- 完工填写处理人和处理结果后状态变为已修好。
+-- 柜详情报修条数与柜体可用标记均以本表为唯一数据源实时推导。
+CREATE TABLE IF NOT EXISTS repair_ticket (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    ticket_no VARCHAR(40) NOT NULL UNIQUE COMMENT '报修单号',
+    locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    compartment_no VARCHAR(20) NOT NULL COMMENT '故障格口编号',
+    symptom VARCHAR(500) NOT NULL COMMENT '故障现象',
+    reporter VARCHAR(50) NOT NULL COMMENT '报修人',
+    status VARCHAR(20) NOT NULL DEFAULT 'PROCESSING' COMMENT '报修状态: PROCESSING-处理中, FIXED-已修好',
+    handler VARCHAR(50) COMMENT '处理人(完工必填)',
+    repair_result VARCHAR(500) COMMENT '处理结果(完工必填)',
+    fixed_time DATETIME COMMENT '完工时间',
+    remark TEXT COMMENT '备注',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_repair_ticket_locker (locker_id),
+    INDEX idx_repair_ticket_status (status),
+    FOREIGN KEY (locker_id) REFERENCES locker(id)
+    -- 同一柜同一格口只允许一条处理中报修单，由后端在建单事务内校验拦截
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜格口报修台账表';
+
 -- ===================== 种子数据（幂等，可重复执行） =====================
 -- 说明：docker-entrypoint-initdb.d 只在空数据卷首次初始化时执行本脚本；
 -- 若数据卷中已有楼栋/单元（旧版本初始化、初始化中断后重启等），
@@ -356,3 +379,16 @@ SELECT 'CB20260806001', l.id, '2026-08', 745.20, '李抄表', '2026-08-06 10:30:
 FROM locker l
 WHERE l.locker_no = 'KDG-003'
   AND NOT EXISTS (SELECT 1 FROM meter_reading_record m WHERE m.record_no = 'CB20260806001');
+
+-- 格口报修台账：按单号幂等补种；KDG-001 处理中（列表/详情显示维修中），KDG-003 已修好的历史记录
+INSERT INTO repair_ticket (ticket_no, locker_id, compartment_no, symptom, reporter, status, remark)
+SELECT 'BX20260911001', l.id, '5', '5号格口门磁失灵，关门后指示灯不亮', '业主刘先生', 'PROCESSING', '已通知维保单位安排上门'
+FROM locker l
+WHERE l.locker_no = 'KDG-001'
+  AND NOT EXISTS (SELECT 1 FROM repair_ticket r WHERE r.ticket_no = 'BX20260911001');
+
+INSERT INTO repair_ticket (ticket_no, locker_id, compartment_no, symptom, reporter, status, handler, repair_result, fixed_time)
+SELECT 'BX20260825001', l.id, '12', '12号格口锁具卡顿，柜门无法弹开', '快递员小周', 'FIXED', '张师傅', '更换锁芯并调试，开关恢复正常', '2026-08-26 16:00:00'
+FROM locker l
+WHERE l.locker_no = 'KDG-003'
+  AND NOT EXISTS (SELECT 1 FROM repair_ticket r WHERE r.ticket_no = 'BX20260825001');

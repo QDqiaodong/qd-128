@@ -41,6 +41,10 @@ public class LockerDTO {
     private Integer openKeyBorrowCount;
     /** 本月是否已抄电表（已抄/未抄标记，由有效抄表单实时推导，刷新后保持一致） */
     private Boolean meterReadThisMonth;
+    /** 是否有处理中的格口报修单（维修中标记，由报修台账实时推导，刷新后保持一致） */
+    private Boolean repairing;
+    /** 处理中报修条数 */
+    private Integer openRepairCount;
     private String remark;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

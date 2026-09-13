@@ -38,6 +38,10 @@ export interface LockerDTO {
   openKeyBorrowCount?: number
   /** 本月是否已抄电表（已抄/未抄标记，由有效抄表单实时推导） */
   meterReadThisMonth?: boolean
+  /** 是否有处理中的格口报修单（维修中标记，由报修台账实时推导） */
+  repairing?: boolean
+  /** 处理中报修条数 */
+  openRepairCount?: number
   remark: string
   createTime: string
   updateTime: string

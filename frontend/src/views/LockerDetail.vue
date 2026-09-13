@@ -5,10 +5,12 @@ import { lockerApi, buildingApi, STATUS_NAME_MAP } from '@/api/locker'
 import { clearanceApi } from '@/api/clearance'
 import { keyBorrowApi, keyHandoverApi } from '@/api/keyBorrow'
 import { meterReadingApi } from '@/api/meterReading'
+import { repairApi } from '@/api/repair'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ClearanceOrder } from '@/api/clearance'
 import type { KeyBorrowRecord, KeyHandover } from '@/api/keyBorrow'
 import type { MeterReadingRecord } from '@/api/meterReading'
+import type { RepairTicket, RepairTicketCreateRequest } from '@/api/repair'
 import type {
   LockerDTO,
   AdjustmentRecord,
@@ -30,6 +32,7 @@ const clearanceOrders = ref<ClearanceOrder[]>([])
 const keyBorrowRecords = ref<KeyBorrowRecord[]>([])
 const keyHandovers = ref<KeyHandover[]>([])
 const meterReadings = ref<MeterReadingRecord[]>([])
+const repairTickets = ref<RepairTicket[]>([])
 const buildingTree = ref<BuildingTreeDTO[]>([])
 const units = ref<UnitDTO[]>([])
 
@@ -126,7 +129,7 @@ onMounted(async () => {
 
 const fetchData = async () => {
   try {
-    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes, meterReadingRes, keyHandoverRes] = await Promise.all([
+    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes, meterReadingRes, keyHandoverRes, repairRes] = await Promise.all([
       lockerApi.getLockerById(lockerId.value),
       lockerApi.getAdjustmentRecords(lockerId.value),
       lockerApi.getStatusChangeRecords(lockerId.value),
@@ -134,7 +137,8 @@ const fetchData = async () => {
       clearanceApi.getLockerOrders(lockerId.value),
       keyBorrowApi.getLockerRecords(lockerId.value),
       meterReadingApi.getLockerRecords(lockerId.value),
-      keyHandoverApi.getLockerHandovers(lockerId.value)
+      keyHandoverApi.getLockerHandovers(lockerId.value),
+      repairApi.getLockerTickets(lockerId.value)
     ])
     locker.value = lockerRes.data
     adjustmentRecords.value = recordsRes.data
@@ -144,6 +148,7 @@ const fetchData = async () => {
     keyBorrowRecords.value = keyBorrowRes.data
     meterReadings.value = meterReadingRes.data
     keyHandovers.value = keyHandoverRes.data
+    repairTickets.value = repairRes.data
   } catch (error) {
     console.error('获取数据失败', error)
   }
@@ -181,6 +186,162 @@ const handleAdjust = async () => {
     await fetchData()
   } catch (error: any) {
     ElMessage.error(error.response?.data?.message || '调整失败')
+  }
+}
+
+// ---------------- 格口报修 ----------------
+
+const repairDialogVisible = ref(false)
+const repairSubmitting = ref(false)
+const repairForm = ref<RepairTicketCreateRequest>(emptyRepairForm())
+
+function emptyRepairForm(): RepairTicketCreateRequest {
+  return {
+    lockerId: lockerId.value,
+    compartmentNo: '',
+    symptom: '',
+    reporter: '',
+    remark: ''
+  }
+}
+
+/** 处理中的报修单占用的格口：同一格口处理中不能重复报修，与后端校验口径一致 */
+const repairingCompartments = computed(() =>
+  new Set(repairTickets.value.filter((t) => t.processing).map((t) => t.compartmentNo))
+)
+
+/** 该柜全部格口编号（1..格口数量），处理中的格口置灰 */
+const compartmentOptions = computed(() => {
+  const count = locker.value?.compartmentCount || 0
+  return Array.from({ length: count }, (_, i) => {
+    const no = String(i + 1)
+    return { no, repairing: repairingCompartments.value.has(no) }
+  })
+})
+
+/** 处理中报修条数：与柜体列表/详情的维修中标记同源，均由报修台账实时推导 */
+const openRepairCount = computed(
+  () => repairTickets.value.filter((t) => t.processing).length
+)
+
+const openRepairDialog = () => {
+  repairForm.value = emptyRepairForm()
+  repairDialogVisible.value = true
+}
+
+/** 表单已填写内容时，关闭窗口前确认，避免误关丢单 */
+const repairFormDirty = computed(() => {
+  const f = repairForm.value
+  return !!(f.compartmentNo || f.symptom.trim() || f.reporter.trim() || (f.remark && f.remark.trim()))
+})
+
+/**
+ * 登记内容只保存在本窗口内，未提交前关闭不会写入任何数据；
+ * 已填写内容时关闭需二次确认，关掉窗口不会留下半条报修单。
+ */
+const handleRepairDialogClose = (done: () => void) => {
+  if (!repairFormDirty.value) {
+    done()
+    return
+  }
+  ElMessageBox.confirm('关闭后本次填写的内容将丢弃，且不会生成报修单，确认关闭？', '提示', {
+    type: 'warning',
+    confirmButtonText: '丢弃并关闭',
+    cancelButtonText: '继续填写'
+  })
+    .then(() => done())
+    .catch(() => {})
+}
+
+const submitRepair = async () => {
+  const f = repairForm.value
+  if (!f.compartmentNo) {
+    ElMessage.warning('请选择故障格口')
+    return
+  }
+  if (!f.symptom.trim()) {
+    ElMessage.warning('请填写故障现象')
+    return
+  }
+  if (!f.reporter.trim()) {
+    ElMessage.warning('请填写报修人')
+    return
+  }
+  repairSubmitting.value = true
+  try {
+    await repairApi.createTicket({
+      lockerId: lockerId.value,
+      compartmentNo: f.compartmentNo,
+      symptom: f.symptom.trim(),
+      reporter: f.reporter.trim(),
+      remark: f.remark?.trim() || undefined
+    })
+    ElMessage.success('报修登记成功，柜体已标记维修中')
+    repairDialogVisible.value = false
+    repairForm.value = emptyRepairForm()
+    await fetchData()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '报修登记失败')
+  } finally {
+    repairSubmitting.value = false
+  }
+}
+
+// ---------------- 报修完工 ----------------
+
+const completeDialogVisible = ref(false)
+const completing = ref(false)
+const completeTarget = ref<RepairTicket | null>(null)
+const completeForm = ref({ handler: '', repairResult: '' })
+
+const openCompleteDialog = (ticket: RepairTicket) => {
+  completeTarget.value = ticket
+  completeForm.value = { handler: '', repairResult: '' }
+  completeDialogVisible.value = true
+}
+
+/** 完工内容只保存在本窗口内，未提交前关闭不会写入任何数据；已填写内容时关闭需二次确认 */
+const completeFormDirty = computed(
+  () => !!(completeForm.value.handler.trim() || completeForm.value.repairResult.trim())
+)
+
+const handleCompleteDialogClose = (done: () => void) => {
+  if (!completeFormDirty.value) {
+    done()
+    return
+  }
+  ElMessageBox.confirm('关闭后本次填写的完工内容将丢弃，报修单仍为处理中，确认关闭？', '提示', {
+    type: 'warning',
+    confirmButtonText: '丢弃并关闭',
+    cancelButtonText: '继续填写'
+  })
+    .then(() => done())
+    .catch(() => {})
+}
+
+const submitComplete = async () => {
+  if (!completeTarget.value) return
+  if (!completeForm.value.handler.trim()) {
+    ElMessage.warning('完工必须填写处理人')
+    return
+  }
+  if (!completeForm.value.repairResult.trim()) {
+    ElMessage.warning('完工必须填写处理结果')
+    return
+  }
+  completing.value = true
+  try {
+    await repairApi.completeTicket(completeTarget.value.id, {
+      handler: completeForm.value.handler.trim(),
+      repairResult: completeForm.value.repairResult.trim()
+    })
+    ElMessage.success('完工登记成功，报修单已修好')
+    completeDialogVisible.value = false
+    await fetchData()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '完工登记失败')
+  } finally {
+    completing.value = false
   }
 }
 
@@ -237,6 +398,10 @@ const currentMonthReading = computed(() =>
           <el-tag v-if="locker.keyBorrowed" type="warning" style="margin-left: 8px">
             钥匙借用中
           </el-tag>
+          <el-tag v-if="locker.repairing" type="danger" style="margin-left: 8px">
+            维修中（{{ locker.openRepairCount }} 单）
+          </el-tag>
+          <el-tag v-else type="success" style="margin-left: 8px">可用</el-tag>
           <el-tag v-if="locker.meterReadThisMonth" type="success" style="margin-left: 8px">
             本月已抄
           </el-tag>
@@ -263,6 +428,7 @@ const currentMonthReading = computed(() =>
 
       <div class="action-bar">
         <el-button type="primary" @click="showAdjustDialog = true">调整归属</el-button>
+        <el-button type="danger" plain @click="openRepairDialog">登记报修</el-button>
         <template v-if="locker.status === 'ACTIVE'">
           <el-button type="warning" @click="openStatusDialog('TEMPORARILY_DISABLED')">临时停用</el-button>
           <el-button type="danger" @click="openStatusDialog('PERMANENTLY_DISABLED')">永久停用</el-button>
@@ -480,6 +646,64 @@ const currentMonthReading = computed(() =>
     </el-card>
 
     <el-card style="margin-top: 20px;">
+      <template #header>
+        <div class="card-header">
+          <span>格口报修记录</span>
+          <div class="card-header-tags">
+            <el-tag v-if="openRepairCount > 0" type="danger" size="small">
+              处理中 {{ openRepairCount }} 条
+            </el-tag>
+            <el-tag v-else type="success" size="small">可用</el-tag>
+            <el-button type="danger" plain size="small" @click="openRepairDialog">登记报修</el-button>
+          </div>
+        </div>
+      </template>
+      <el-table :data="repairTickets" border v-if="repairTickets.length > 0">
+        <el-table-column prop="ticketNo" label="报修单号" width="190" />
+        <el-table-column label="故障格口" width="90" align="center">
+          <template #default="{ row }">{{ row.compartmentNo }} 号</template>
+        </el-table-column>
+        <el-table-column prop="symptom" label="故障现象" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="reporter" label="报修人" width="100" />
+        <el-table-column label="报修时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.createTime) }}</template>
+        </el-table-column>
+        <el-table-column label="状态" width="100">
+          <template #default="{ row }">
+            <el-tag v-if="row.processing" type="danger">处理中</el-tag>
+            <el-tag v-else type="success">已修好</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="handler" label="处理人" width="100">
+          <template #default="{ row }">{{ row.handler || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="处理结果" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.fixedTime"
+              :content="`完工时间：${formatTime(row.fixedTime)}`"
+              placement="top"
+            >
+              <span>{{ row.repairResult || '-' }}</span>
+            </el-tooltip>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="100" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.processing"
+              size="small"
+              type="warning"
+              @click="openCompleteDialog(row)"
+            >完工</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-else class="empty-tip">暂无格口报修记录</div>
+    </el-card>
+
+    <el-card style="margin-top: 20px;">
       <template #header>归属调整历史</template>
       <el-table :data="adjustmentRecords" border v-if="adjustmentRecords.length > 0">
         <el-table-column prop="id" label="记录ID" width="80" />
@@ -580,6 +804,108 @@ const currentMonthReading = computed(() =>
         <el-button type="primary" @click="handleAdjust">确认调整</el-button>
       </template>
     </el-dialog>
+
+    <!-- 登记报修弹窗：未提交前关闭仅丢弃草稿，不会留下半条报修单 -->
+    <el-dialog
+      title="登记格口报修"
+      v-model="repairDialogVisible"
+      width="520px"
+      :close-on-click-modal="false"
+      :before-close="handleRepairDialogClose"
+    >
+      <el-alert type="warning" :closable="false" class="dialog-tip">
+        故障格口、故障现象、报修人必填，未填齐不能建单；提交后柜体标记「维修中」，同一格口处理中不能重复报修。
+      </el-alert>
+      <el-form :model="repairForm" label-width="90px">
+        <el-form-item label="柜体">
+          <el-tag type="info">{{ locker?.lockerNo }}</el-tag>
+          <span class="repair-locker-meta">{{ locker?.buildingName }} {{ locker?.unitName }}</span>
+        </el-form-item>
+        <el-form-item label="故障格口" required>
+          <el-select
+            v-model="repairForm.compartmentNo"
+            filterable
+            placeholder="请选择故障格口"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="opt in compartmentOptions"
+              :key="opt.no"
+              :value="opt.no"
+              :disabled="opt.repairing"
+              :label="`${opt.no} 号格口`"
+            >
+              <span>{{ opt.no }} 号格口</span>
+              <el-tag v-if="opt.repairing" type="danger" size="small" class="repair-option-tag">
+                处理中
+              </el-tag>
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="故障现象" required>
+          <el-input
+            v-model="repairForm.symptom"
+            type="textarea"
+            :rows="3"
+            placeholder="必填，如：门磁失灵，关门后指示灯不亮"
+          />
+        </el-form-item>
+        <el-form-item label="报修人" required>
+          <el-input v-model="repairForm.reporter" placeholder="必填，请填写报修人" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="repairForm.remark"
+            type="textarea"
+            :rows="2"
+            placeholder="选填，如联系方式、维保单位等"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="handleRepairDialogClose(() => (repairDialogVisible = false))">取消</el-button>
+        <el-button type="primary" :loading="repairSubmitting" @click="submitRepair">提交报修</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 报修完工弹窗 -->
+    <el-dialog
+      title="报修完工"
+      v-model="completeDialogVisible"
+      width="520px"
+      :close-on-click-modal="false"
+      :before-close="handleCompleteDialogClose"
+    >
+      <template v-if="completeTarget">
+        <el-alert type="warning" :closable="false" class="dialog-tip">
+          完工后报修单状态变为「已修好」；该柜处理中条数相应减少，全部修好后柜体恢复「可用」。
+        </el-alert>
+        <el-descriptions :column="2" border class="dialog-tip">
+          <el-descriptions-item label="报修单号">{{ completeTarget.ticketNo }}</el-descriptions-item>
+          <el-descriptions-item label="故障格口">{{ completeTarget.compartmentNo }} 号</el-descriptions-item>
+          <el-descriptions-item label="报修人">{{ completeTarget.reporter }}</el-descriptions-item>
+          <el-descriptions-item label="报修时间">{{ formatTime(completeTarget.createTime) }}</el-descriptions-item>
+          <el-descriptions-item label="故障现象" :span="2">{{ completeTarget.symptom }}</el-descriptions-item>
+        </el-descriptions>
+        <el-form label-width="90px">
+          <el-form-item label="处理人" required>
+            <el-input v-model="completeForm.handler" placeholder="必填，请填写处理人" />
+          </el-form-item>
+          <el-form-item label="处理结果" required>
+            <el-input
+              v-model="completeForm.repairResult"
+              type="textarea"
+              :rows="3"
+              placeholder="必填，如：更换锁芯并调试，开关恢复正常"
+            />
+          </el-form-item>
+        </el-form>
+      </template>
+      <template #footer>
+        <el-button @click="handleCompleteDialogClose(() => (completeDialogVisible = false))">取消</el-button>
+        <el-button type="warning" :loading="completing" @click="submitComplete">确认完工</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -612,6 +938,26 @@ const currentMonthReading = computed(() =>
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.card-header-tags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.repair-locker-meta {
+  margin-left: 8px;
+  color: #999;
+  font-size: 12px;
+}
+
+.repair-option-tag {
+  float: right;
+}
+
+.dialog-tip {
+  margin-bottom: 16px;
 }
 
 .reading-meta {
