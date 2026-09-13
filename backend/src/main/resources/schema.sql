@@ -200,6 +200,34 @@ CREATE TABLE IF NOT EXISTS key_borrow_record (
     FOREIGN KEY (locker_id) REFERENCES locker(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜柜门钥匙借用台账表';
 
+-- 钥匙交接班：交班人点名当前全部未还柜并填写接班人、交接说明后一次提交；
+-- 交接只留保管责任转移痕迹，不改变借用记录状态，按柜一览未还条数不变。
+CREATE TABLE IF NOT EXISTS key_handover (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    handover_no VARCHAR(40) NOT NULL UNIQUE COMMENT '交接单号',
+    handover_from VARCHAR(50) NOT NULL COMMENT '交班人',
+    handover_to VARCHAR(50) NOT NULL COMMENT '接班人',
+    handover_note VARCHAR(500) NOT NULL COMMENT '交接说明',
+    item_count INT NOT NULL COMMENT '本次点名未还柜数量',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='钥匙交接班记录表';
+
+-- 交接点名明细：一条对应提交时点名的一条借用中台账，仅按 ID 关联、不加外键，
+-- 避免柜体/台账生命周期变更影响历史交接痕迹留存。
+CREATE TABLE IF NOT EXISTS key_handover_item (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    handover_id BIGINT NOT NULL COMMENT '交接记录ID',
+    record_id BIGINT NOT NULL COMMENT '借用台账记录ID',
+    locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    locker_no VARCHAR(50) COMMENT '点名时柜体编号快照',
+    borrower_snapshot VARCHAR(50) COMMENT '点名时借出人快照',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_handover_item_handover (handover_id),
+    INDEX idx_handover_item_record (record_id),
+    INDEX idx_handover_item_locker (locker_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='钥匙交接班点名明细表';
+
 CREATE TABLE IF NOT EXISTS meter_reading_record (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     record_no VARCHAR(40) NOT NULL UNIQUE COMMENT '抄表单号',

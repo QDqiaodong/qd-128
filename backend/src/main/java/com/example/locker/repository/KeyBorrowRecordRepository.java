@@ -22,5 +22,7 @@ public interface KeyBorrowRecordRepository extends JpaRepository<KeyBorrowRecord
 
     List<KeyBorrowRecord> findByLockerIdInAndStatus(Collection<Long> lockerIds, KeyBorrowStatus status);
 
+    List<KeyBorrowRecord> findByStatusOrderByCreateTimeDesc(KeyBorrowStatus status);
+
     long countByLockerIdAndStatus(Long lockerId, KeyBorrowStatus status);
 }

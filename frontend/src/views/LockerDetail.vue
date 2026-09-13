@@ -3,11 +3,11 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { lockerApi, buildingApi, STATUS_NAME_MAP } from '@/api/locker'
 import { clearanceApi } from '@/api/clearance'
-import { keyBorrowApi } from '@/api/keyBorrow'
+import { keyBorrowApi, keyHandoverApi } from '@/api/keyBorrow'
 import { meterReadingApi } from '@/api/meterReading'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ClearanceOrder } from '@/api/clearance'
-import type { KeyBorrowRecord } from '@/api/keyBorrow'
+import type { KeyBorrowRecord, KeyHandover } from '@/api/keyBorrow'
 import type { MeterReadingRecord } from '@/api/meterReading'
 import type {
   LockerDTO,
@@ -28,6 +28,7 @@ const adjustmentRecords = ref<AdjustmentRecord[]>([])
 const statusRecords = ref<StatusChangeRecord[]>([])
 const clearanceOrders = ref<ClearanceOrder[]>([])
 const keyBorrowRecords = ref<KeyBorrowRecord[]>([])
+const keyHandovers = ref<KeyHandover[]>([])
 const meterReadings = ref<MeterReadingRecord[]>([])
 const buildingTree = ref<BuildingTreeDTO[]>([])
 const units = ref<UnitDTO[]>([])
@@ -125,14 +126,15 @@ onMounted(async () => {
 
 const fetchData = async () => {
   try {
-    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes, meterReadingRes] = await Promise.all([
+    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes, meterReadingRes, keyHandoverRes] = await Promise.all([
       lockerApi.getLockerById(lockerId.value),
       lockerApi.getAdjustmentRecords(lockerId.value),
       lockerApi.getStatusChangeRecords(lockerId.value),
       buildingApi.getBuildingTree(),
       clearanceApi.getLockerOrders(lockerId.value),
       keyBorrowApi.getLockerRecords(lockerId.value),
-      meterReadingApi.getLockerRecords(lockerId.value)
+      meterReadingApi.getLockerRecords(lockerId.value),
+      keyHandoverApi.getLockerHandovers(lockerId.value)
     ])
     locker.value = lockerRes.data
     adjustmentRecords.value = recordsRes.data
@@ -141,6 +143,7 @@ const fetchData = async () => {
     clearanceOrders.value = clearanceRes.data
     keyBorrowRecords.value = keyBorrowRes.data
     meterReadings.value = meterReadingRes.data
+    keyHandovers.value = keyHandoverRes.data
   } catch (error) {
     console.error('获取数据失败', error)
   }
@@ -400,6 +403,45 @@ const currentMonthReading = computed(() =>
     <el-card style="margin-top: 20px;">
       <template #header>
         <div class="card-header">
+          <span>钥匙交接痕迹</span>
+          <el-tag size="small" type="info">交接不改借用状态，未还条数不变</el-tag>
+        </div>
+      </template>
+      <el-timeline v-if="keyHandovers.length > 0">
+        <el-timeline-item
+          v-for="h in keyHandovers"
+          :key="h.id"
+          :timestamp="formatTime(h.createTime)"
+          placement="top"
+          type="primary"
+        >
+          <el-card shadow="never">
+            <div class="handover-line">
+              <el-tag size="small">{{ h.handoverNo }}</el-tag>
+              <b>{{ h.handoverFrom }}</b> 交班给 <b>{{ h.handoverTo }}</b>
+              <el-tag size="small" type="info">本次点名 {{ h.itemCount }} 柜</el-tag>
+            </div>
+            <div class="handover-note">交接说明：{{ h.handoverNote }}</div>
+            <div v-if="h.items && h.items.length" class="handover-items">
+              <el-tag
+                v-for="item in h.items.filter((i) => i.lockerId === lockerId)"
+                :key="item.id"
+                size="small"
+                :type="item.onLoan ? 'danger' : 'success'"
+                style="margin: 2px"
+              >
+                {{ item.lockerNo }}（{{ item.onLoan ? '仍借用中' : '已归还' }}，借出人：{{ item.borrower }}）
+              </el-tag>
+            </div>
+          </el-card>
+        </el-timeline-item>
+      </el-timeline>
+      <div v-else class="empty-tip">暂无钥匙交接痕迹</div>
+    </el-card>
+
+    <el-card style="margin-top: 20px;">
+      <template #header>
+        <div class="card-header">
           <span>电表抄表记录</span>
           <el-tag v-if="locker?.meterReadThisMonth" type="success" size="small">本月已抄</el-tag>
           <el-tag v-else type="info" size="small">本月未抄</el-tag>
@@ -575,6 +617,23 @@ const currentMonthReading = computed(() =>
 .reading-meta {
   color: #999;
   font-size: 12px;
+}
+
+.handover-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.handover-note {
+  margin-top: 8px;
+  color: #555;
+  font-size: 13px;
+}
+
+.handover-items {
+  margin-top: 8px;
 }
 
 .empty-tip {

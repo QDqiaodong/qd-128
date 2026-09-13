@@ -41,8 +41,65 @@ export interface KeyBorrowRecord {
   lastExtendReason: string | null
   /** 最近一次改期时间 */
   lastExtendTime: string | null
+  /** 被交接班点名的次数：交接只留痕迹不改状态 */
+  handoverCount: number
   createTime: string
   updateTime: string
+}
+
+/** 交接窗口待点名的一条未还借用记录 */
+export interface KeyHandoverPendingItem {
+  recordId: number
+  recordNo: string
+  lockerId: number
+  lockerNo: string
+  buildingName: string | null
+  unitName: string | null
+  floor: string | null
+  borrower: string
+  reason: string
+  borrowTime: string
+  expectedReturnTime: string
+  /** 预计归还已过 */
+  overdue: boolean
+}
+
+/** 交接点名明细 */
+export interface KeyHandoverItem {
+  id: number
+  recordId: number
+  lockerId: number
+  lockerNo: string | null
+  recordNo: string | null
+  buildingName: string | null
+  unitName: string | null
+  floor: string | null
+  borrower: string | null
+  reason: string | null
+  borrowTime: string | null
+  expectedReturnTime: string | null
+  /** 该单当前是否仍未还（交接不改状态） */
+  onLoan: boolean
+}
+
+/** 钥匙交接班记录（台账中的交接痕迹） */
+export interface KeyHandover {
+  id: number
+  handoverNo: string
+  handoverFrom: string
+  handoverTo: string
+  handoverNote: string
+  itemCount: number
+  createTime: string
+  items: KeyHandoverItem[]
+}
+
+export interface KeyHandoverCreateRequest {
+  handoverFrom: string
+  handoverTo: string
+  handoverNote: string
+  /** 点名勾选的未还记录 ID，必须勾齐全部未还柜 */
+  recordIds: number[]
 }
 
 export interface KeyBorrowLockerOption {
@@ -145,5 +202,38 @@ export const keyBorrowApi = {
 
   getStatuses() {
     return api.get<Record<KeyBorrowStatusCode, string>>('/key-borrows/statuses')
+  }
+}
+
+export const keyHandoverApi = {
+  /** 交接窗口待点名清单：当前全部借用中记录 */
+  getPendingItems() {
+    return api.get<KeyHandoverPendingItem[]>('/key-handovers/pending')
+  },
+
+  /** 提交交接：必须勾齐全部未还柜，交班人/接班人/交接说明必填 */
+  submit(data: KeyHandoverCreateRequest) {
+    return api.post<KeyHandover>('/key-handovers', data)
+  },
+
+  /** 交接痕迹分页 */
+  getHandovers(params: { page?: number; size?: number }) {
+    return api.get<PageResponse<KeyHandover>>('/key-handovers', {
+      params: { page: params.page, size: params.size }
+    })
+  },
+
+  getHandover(id: number) {
+    return api.get<KeyHandover>(`/key-handovers/${id}`)
+  },
+
+  /** 某台柜体相关的全部交接痕迹（柜详情页） */
+  getLockerHandovers(lockerId: number) {
+    return api.get<KeyHandover[]>(`/key-handovers/by-locker/${lockerId}`)
+  },
+
+  /** 某条借用记录被点名过的交接痕迹（台账列表） */
+  getRecordHandovers(recordId: number) {
+    return api.get<KeyHandover[]>(`/key-handovers/by-record/${recordId}`)
   }
 }

@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
-import { keyBorrowApi, KEY_BORROW_STATUS_NAME_MAP } from '@/api/keyBorrow'
+import { keyBorrowApi, keyHandoverApi, KEY_BORROW_STATUS_NAME_MAP } from '@/api/keyBorrow'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type {
   KeyBorrowRecord,
   KeyBorrowLockerOption,
   LockerKeyBorrowOverview,
   KeyBorrowStatusCode,
-  KeyBorrowCreateRequest
+  KeyBorrowCreateRequest,
+  KeyHandover,
+  KeyHandoverPendingItem
 } from '@/api/keyBorrow'
 
 // ---------------- 借用台账列表 ----------------
@@ -329,6 +331,148 @@ const submitExtend = async () => {
   }
 }
 
+// ---------------- 交接班 ----------------
+
+const handoverDialogVisible = ref(false)
+const pendingItems = ref<KeyHandoverPendingItem[]>([])
+const pendingLoading = ref(false)
+const pendingLoaded = ref(false)
+const handoverTableRef = ref<{
+  toggleRowSelection: (row: KeyHandoverPendingItem, selected?: boolean) => void
+  clearSelection: () => void
+} | null>(null)
+const submittingHandover = ref(false)
+/** 勾选的未还记录 ID，默认不勾，由交班人逐一点名（也可一键勾齐后再逐柜核对） */
+const checkedRecordIds = ref<number[]>([])
+const handoverForm = ref({ handoverFrom: '', handoverTo: '', handoverNote: '' })
+
+/** 待点名未还总数：与按柜一览未还总条数同源，都是实时推导的借用中记录 */
+const pendingTotal = computed(() => pendingItems.value.length)
+const checkedTotal = computed(() => checkedRecordIds.value.length)
+const allChecked = computed(
+  () => pendingTotal.value > 0 && checkedTotal.value === pendingTotal.value
+)
+
+const handoverFormDirty = computed(() =>
+  !!(
+    checkedRecordIds.value.length ||
+    handoverForm.value.handoverFrom.trim() ||
+    handoverForm.value.handoverTo.trim() ||
+    handoverForm.value.handoverNote.trim()
+  )
+)
+
+const openHandoverDialog = async () => {
+  checkedRecordIds.value = []
+  handoverForm.value = { handoverFrom: '', handoverTo: '', handoverNote: '' }
+  handoverDialogVisible.value = true
+  pendingLoaded.value = false
+  pendingLoading.value = true
+  try {
+    const res = await keyHandoverApi.getPendingItems()
+    pendingItems.value = res.data
+    pendingLoaded.value = true
+    if (pendingItems.value.length === 0) {
+      ElMessage.info('当前没有借用中的柜，无需交接')
+    }
+  } catch (error) {
+    console.error('获取待点名未还柜失败', error)
+    pendingItems.value = []
+  } finally {
+    pendingLoading.value = false
+  }
+}
+
+const handleCheckAllChange = (val: boolean | string | number) => {
+  // 点表头复选框：勾齐或清空，具体选中行仍以表格 selection 为准并触发 selection-change
+  if (val) {
+    pendingItems.value.forEach((row) => handoverTableRef.value?.toggleRowSelection(row, true))
+  } else {
+    handoverTableRef.value?.clearSelection()
+  }
+}
+
+/**
+ * 交接内容只保存在本窗口内，未提交关闭不写任何数据；
+ * 已勾选/填写时关闭需二次确认，关掉窗口不会留下半次交接。
+ */
+const handleHandoverDialogClose = (done: () => void) => {
+  if (!handoverFormDirty.value) {
+    done()
+    return
+  }
+  ElMessageBox.confirm('关闭后本次点名与交接内容将丢弃，且不会生成交接记录，确认关闭？', '提示', {
+    type: 'warning',
+    confirmButtonText: '丢弃并关闭',
+    cancelButtonText: '继续交接'
+  })
+    .then(() => done())
+    .catch(() => {})
+}
+
+const submitHandover = async () => {
+  if (checkedTotal.value === 0) {
+    ElMessage.warning('请勾选当前借用中的柜逐一点名')
+    return
+  }
+  if (checkedTotal.value !== pendingTotal.value) {
+    ElMessage.warning(`还有 ${pendingTotal.value - checkedTotal.value} 个未还柜未点名，勾齐全部未还柜才能交班`)
+    return
+  }
+  if (!handoverForm.value.handoverFrom.trim()) {
+    ElMessage.warning('请填写交班人')
+    return
+  }
+  if (!handoverForm.value.handoverTo.trim()) {
+    ElMessage.warning('请填写接班人')
+    return
+  }
+  if (!handoverForm.value.handoverNote.trim()) {
+    ElMessage.warning('请填写交接说明')
+    return
+  }
+  submittingHandover.value = true
+  try {
+    await keyHandoverApi.submit({
+      handoverFrom: handoverForm.value.handoverFrom.trim(),
+      handoverTo: handoverForm.value.handoverTo.trim(),
+      handoverNote: handoverForm.value.handoverNote.trim(),
+      recordIds: [...checkedRecordIds.value]
+    })
+    ElMessage.success('交接成功，交接痕迹已记入台账，未还柜仍为借用中')
+    handoverDialogVisible.value = false
+    await fetchRecords()
+    // 交接不改借用状态：刷新一览与页头未还条数，条数应与提交前一致
+    await fetchOverview()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '交接失败')
+  } finally {
+    submittingHandover.value = false
+  }
+}
+
+// ---------------- 交接痕迹 ----------------
+
+const handoverTraceVisible = ref(false)
+const traceLoading = ref(false)
+const traceRecords = ref<KeyHandover[]>([])
+const traceTarget = ref<KeyBorrowRecord | null>(null)
+
+const openHandoverTrace = async (record: KeyBorrowRecord) => {
+  traceTarget.value = record
+  traceRecords.value = []
+  handoverTraceVisible.value = true
+  traceLoading.value = true
+  try {
+    const res = await keyHandoverApi.getRecordHandovers(record.id)
+    traceRecords.value = res.data
+  } catch (error) {
+    console.error('获取交接痕迹失败', error)
+  } finally {
+    traceLoading.value = false
+  }
+}
+
 // ---------------- 展示辅助 ----------------
 
 const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
@@ -378,7 +522,10 @@ onMounted(() => {
           <el-button type="primary" @click="handleSearch">查询</el-button>
           <el-button @click="handleReset">重置</el-button>
         </div>
-        <el-button type="success" @click="openCreateDialog()">登记借用</el-button>
+        <div class="header-actions">
+          <el-button type="primary" @click="openHandoverDialog">交接班</el-button>
+          <el-button type="success" @click="openCreateDialog()">登记借用</el-button>
+        </div>
       </div>
 
       <el-table :data="records" border v-loading="recordsLoading">
@@ -406,11 +553,19 @@ onMounted(() => {
             </el-tooltip>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="110">
+        <el-table-column label="状态" width="130">
           <template #default="{ row }">
             <el-tag v-if="row.onLoan" type="danger">借用中</el-tag>
             <el-tag v-else type="success">已归还</el-tag>
             <el-tag v-if="row.returnOverdue" type="warning" style="margin-left: 4px">逾期未还</el-tag>
+            <el-button
+              v-if="row.handoverCount > 0"
+              link
+              type="primary"
+              size="small"
+              style="margin-left: 4px"
+              @click="openHandoverTrace(row)"
+            >已交接×{{ row.handoverCount }}</el-button>
           </template>
         </el-table-column>
         <el-table-column prop="returner" label="归还人" width="100">
@@ -474,7 +629,10 @@ onMounted(() => {
       </el-alert>
       <div class="list-header">
         <span />
-        <el-button type="success" @click="openCreateDialog()">登记借用</el-button>
+        <div class="header-actions">
+          <el-button type="primary" @click="openHandoverDialog">交接班</el-button>
+          <el-button type="success" @click="openCreateDialog()">登记借用</el-button>
+        </div>
       </div>
       <el-table :data="overview" border v-loading="overviewLoading">
         <el-table-column prop="lockerNo" label="柜体编号" width="120">
@@ -688,6 +846,119 @@ onMounted(() => {
         <el-button type="warning" :loading="returning" @click="submitReturn">确认归还</el-button>
       </template>
     </el-dialog>
+
+    <!-- ================= 交接班弹窗 ================= -->
+    <el-dialog
+      title="钥匙交接班"
+      v-model="handoverDialogVisible"
+      width="760px"
+      :close-on-click-modal="false"
+      :before-close="handleHandoverDialogClose"
+    >
+      <el-alert type="info" :closable="false" class="dialog-tip">
+        交班人需勾选当前全部借用中的柜逐一点名，并填写接班人和交接说明。
+        <template v-if="pendingLoaded">当前共 <b>{{ pendingTotal }}</b> 个未还柜，已点名 <b>{{ checkedTotal }}</b> 个；</template>
+        交接只转移保管责任，各柜仍为「借用中」，未还条数不变。
+      </el-alert>
+
+      <el-table
+        ref="handoverTableRef"
+        :data="pendingItems"
+        border
+        height="300"
+        v-loading="pendingLoading"
+        row-key="recordId"
+        @selection-change="(sel: KeyHandoverPendingItem[]) => (checkedRecordIds = sel.map((i) => i.recordId))"
+      >
+        <el-table-column type="selection" width="55" align="center">
+          <template #header>
+            <el-tooltip content="一键勾齐后仍请逐柜核对" placement="top">
+              <el-checkbox
+                :model-value="allChecked"
+                :indeterminate="checkedTotal > 0 && !allChecked"
+                @change="handleCheckAllChange"
+              />
+            </el-tooltip>
+          </template>
+        </el-table-column>
+        <el-table-column prop="lockerNo" label="柜体编号" width="110">
+          <template #default="{ row }">
+            <el-tag type="info">{{ row.lockerNo }}</el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="位置" width="150">
+          <template #default="{ row }">{{ row.buildingName }} {{ row.unitName }}</template>
+        </el-table-column>
+        <el-table-column prop="borrower" label="借出人" width="90" />
+        <el-table-column prop="reason" label="借用事由" min-width="140" show-overflow-tooltip />
+        <el-table-column label="预计归还" width="170">
+          <template #default="{ row }">
+            {{ formatTime(row.expectedReturnTime) }}
+            <el-tag v-if="row.overdue" type="danger" size="small" style="margin-left: 4px">逾期</el-tag>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-if="!pendingLoading && pendingItems.length === 0" class="empty-tip">
+        当前没有借用中的柜，无需交接
+      </div>
+
+      <el-form :model="handoverForm" label-width="90px" style="margin-top: 16px">
+        <el-form-item label="交班人" required>
+          <el-input v-model="handoverForm.handoverFrom" placeholder="请填写交班人" />
+        </el-form-item>
+        <el-form-item label="接班人" required>
+          <el-input v-model="handoverForm.handoverTo" placeholder="请填写接班人" />
+        </el-form-item>
+        <el-form-item label="交接说明" required>
+          <el-input
+            v-model="handoverForm.handoverNote"
+            type="textarea"
+            :rows="2"
+            placeholder="必填，如钥匙存放位置、逾期柜跟进事项等"
+          />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="handleHandoverDialogClose(() => (handoverDialogVisible = false))">取消</el-button>
+        <el-button
+          type="primary"
+          :loading="submittingHandover"
+          :disabled="pendingTotal === 0"
+          @click="submitHandover"
+        >
+          提交交接（{{ checkedTotal }}/{{ pendingTotal }}）
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- ================= 交接痕迹弹窗 ================= -->
+    <el-dialog title="交接痕迹" v-model="handoverTraceVisible" width="720px">
+      <div v-if="traceTarget" class="trace-head">
+        <el-tag type="info">{{ traceTarget.lockerNo }}</el-tag>
+        <span>台账编号 {{ traceTarget.recordNo }}</span>
+        <span>借出人 {{ traceTarget.borrower }}</span>
+      </div>
+      <el-timeline v-loading="traceLoading" style="margin-top: 16px">
+        <el-timeline-item
+          v-for="h in traceRecords"
+          :key="h.id"
+          :timestamp="formatTime(h.createTime)"
+          placement="top"
+          type="primary"
+        >
+          <el-card shadow="never">
+            <div class="trace-line">
+              <el-tag size="small">{{ h.handoverNo }}</el-tag>
+              <b>{{ h.handoverFrom }}</b> 交班给 <b>{{ h.handoverTo }}</b>
+              <el-tag size="small" type="info">点名 {{ h.itemCount }} 柜</el-tag>
+            </div>
+            <div class="trace-note">交接说明：{{ h.handoverNote }}</div>
+          </el-card>
+        </el-timeline-item>
+      </el-timeline>
+      <div v-if="!traceLoading && traceRecords.length === 0" class="empty-tip">暂无交接痕迹</div>
+    </el-dialog>
   </div>
 </template>
 
@@ -706,6 +977,32 @@ onMounted(() => {
 .search-box {
   display: flex;
   gap: 12px;
+}
+
+.header-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.trace-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #666;
+  font-size: 13px;
+}
+
+.trace-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.trace-note {
+  margin-top: 8px;
+  color: #555;
+  font-size: 13px;
 }
 
 .locker-location {

@@ -9,6 +9,7 @@ import com.example.locker.enums.KeyBorrowStatus;
 import com.example.locker.enums.LockerStatus;
 import com.example.locker.repository.BuildingRepository;
 import com.example.locker.repository.KeyBorrowRecordRepository;
+import com.example.locker.repository.KeyHandoverItemRepository;
 import com.example.locker.repository.LockerRepository;
 import com.example.locker.repository.UnitRepository;
 import jakarta.persistence.criteria.Predicate;
@@ -43,6 +44,9 @@ public class KeyBorrowService {
 
     @Autowired
     private UnitRepository unitRepository;
+
+    @Autowired
+    private KeyHandoverItemRepository keyHandoverItemRepository;
 
     // ===================== 借出登记 =====================
 
@@ -199,13 +203,16 @@ public class KeyBorrowService {
         List<KeyBorrowRecordDTO> list = recordPage.getContent().stream()
                 .map(this::toDTO)
                 .collect(Collectors.toList());
+        fillHandoverCount(list);
         return new PageResponse<>(list, recordPage.getTotalElements(), page, size);
     }
 
     public KeyBorrowRecordDTO getRecord(Long id) {
         KeyBorrowRecord record = keyBorrowRecordRepository.findById(id).orElseThrow(() ->
                 new RuntimeException("借用记录不存在: " + id));
-        return toDTO(record);
+        KeyBorrowRecordDTO dto = toDTO(record);
+        fillHandoverCount(Collections.singletonList(dto));
+        return dto;
     }
 
     /**
@@ -214,9 +221,12 @@ public class KeyBorrowService {
     public List<KeyBorrowRecordDTO> getLockerRecords(Long lockerId) {
         lockerRepository.findById(lockerId).orElseThrow(() ->
                 new RuntimeException("快递柜不存在: " + lockerId));
-        return keyBorrowRecordRepository.findByLockerIdOrderByCreateTimeDesc(lockerId).stream()
+        List<KeyBorrowRecordDTO> list = keyBorrowRecordRepository
+                .findByLockerIdOrderByCreateTimeDesc(lockerId).stream()
                 .map(this::toDTO)
                 .collect(Collectors.toList());
+        fillHandoverCount(list);
+        return list;
     }
 
     /**
@@ -314,6 +324,24 @@ public class KeyBorrowService {
 
     // ===================== 转换与辅助 =====================
 
+    /**
+     * 批量回填各借用记录被交接班点名的次数。交接只留痕迹不改借用状态，
+     * 台账列表据此显示「已交接×N」，未还条数不受影响。
+     */
+    private void fillHandoverCount(List<KeyBorrowRecordDTO> dtos) {
+        if (dtos == null || dtos.isEmpty()) {
+            return;
+        }
+        List<Long> recordIds = dtos.stream().map(KeyBorrowRecordDTO::getId).collect(Collectors.toList());
+        Map<Long, Long> countMap = new HashMap<>();
+        for (Object[] row : keyHandoverItemRepository.countByRecordIds(recordIds)) {
+            countMap.put((Long) row[0], (Long) row[1]);
+        }
+        for (KeyBorrowRecordDTO dto : dtos) {
+            dto.setHandoverCount(countMap.getOrDefault(dto.getId(), 0L).intValue());
+        }
+    }
+
     private KeyBorrowRecordDTO toDTO(KeyBorrowRecord record) {
         KeyBorrowRecordDTO dto = new KeyBorrowRecordDTO();
         dto.setId(record.getId());
@@ -341,6 +369,7 @@ public class KeyBorrowService {
         dto.setExtendCount(record.getExtendCount() == null ? 0 : record.getExtendCount());
         dto.setLastExtendReason(record.getLastExtendReason());
         dto.setLastExtendTime(record.getLastExtendTime());
+        dto.setHandoverCount(0);
         dto.setCreateTime(record.getCreateTime());
         dto.setUpdateTime(record.getUpdateTime());
 

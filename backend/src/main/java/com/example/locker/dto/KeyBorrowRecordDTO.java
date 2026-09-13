@@ -41,6 +41,8 @@ public class KeyBorrowRecordDTO {
     private String lastExtendReason;
     /** 最近一次改期时间 */
     private LocalDateTime lastExtendTime;
+    /** 被交接班点名的次数：交接只留痕迹不改状态，台账据此展示「已交接×N」 */
+    private Integer handoverCount;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;
 }
