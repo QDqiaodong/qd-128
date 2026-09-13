@@ -258,7 +258,23 @@ const handleBack = () => {
       <template #header>
         <div class="card-header">
           <span>逐台巡检填报（格口 / 屏幕 / 门锁）</span>
-          <el-tag type="info" size="small">选择「异常」将自动生成待处理记录</el-tag>
+          <div class="header-actions">
+            <el-select
+              v-model="inspectionStatusFilter"
+              clearable
+              placeholder="巡检状态"
+              style="width: 140px; margin-right: 8px;"
+              @change="handleInspectionStatusFilterChange"
+            >
+              <el-option
+                v-for="(label, value) in INSPECTION_STATUS_NAME_MAP"
+                :key="value"
+                :label="label"
+                :value="value"
+              />
+            </el-select>
+            <el-tag type="info" size="small">选择「异常」将自动生成待处理记录</el-tag>
+          </div>
         </div>
       </template>
 
