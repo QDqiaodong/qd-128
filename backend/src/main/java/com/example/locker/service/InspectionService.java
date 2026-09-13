@@ -239,8 +239,11 @@ public class InspectionService {
 
     /**
      * 任务详情：逐台柜体的检查项结果，以及关联柜体的实时层级信息。
+     *
+     * @param inspectionStatus 柜级巡检状态筛选：INSPECTED-已巡 / UNINSPECTED-未巡，为空返回全部。
+     *                         已巡/未巡以检查项是否填报为唯一口径，与列表筛选保持同源。
      */
-    public List<InspectionRecordDTO> getTaskRecords(Long taskId) {
+    public List<InspectionRecordDTO> getTaskRecords(Long taskId, String inspectionStatus) {
         getTaskEntity(taskId);
         List<InspectionRecord> records = recordRepository.findByTaskIdOrderByIdAsc(taskId);
 
@@ -260,8 +263,18 @@ public class InspectionService {
             }
         }
 
+        boolean onlyInspected = "INSPECTED".equalsIgnoreCase(StringUtils.trimWhitespace(inspectionStatus));
+        boolean onlyUninspected = "UNINSPECTED".equalsIgnoreCase(StringUtils.trimWhitespace(inspectionStatus));
+
         List<InspectionRecordDTO> result = new ArrayList<>();
         for (InspectionRecord record : records) {
+            boolean filled = record.getCompartmentResult() != null
+                    || record.getScreenResult() != null
+                    || record.getLockResult() != null;
+            if ((onlyInspected && !filled) || (onlyUninspected && filled)) {
+                continue;
+            }
+
             InspectionRecordDTO dto = new InspectionRecordDTO();
             dto.setId(record.getId());
             dto.setTaskId(taskId);
@@ -272,6 +285,7 @@ public class InspectionService {
             dto.setRemark(record.getRemark());
             dto.setInspector(record.getInspector());
             dto.setInspectTime(record.getInspectTime());
+            dto.setInspectionStatus(filled ? "INSPECTED" : "UNINSPECTED");
             dto.setPendingIssueCount(pendingByLocker.getOrDefault(record.getLockerId(), 0L).intValue());
             dto.setTotalIssueCount(totalByLocker.getOrDefault(record.getLockerId(), 0L).intValue());
 
@@ -319,15 +333,18 @@ public class InspectionService {
             CheckResult lock = parseResult(item.getLockResult());
 
             boolean filled = compartment != null || screen != null || lock != null;
-            if (filled) {
-                anyFilled = true;
+            if (!filled) {
+                // 空提交不能落库：否则会把已巡记录抹回未巡，并错误刷新巡检时间
+                throw new IllegalArgumentException("请至少完成一个检查项（格口/屏幕/门锁）");
             }
+            anyFilled = true;
 
             record.setCompartmentResult(compartment);
             record.setScreenResult(screen);
             record.setLockResult(lock);
             record.setRemark(StringUtils.hasText(item.getRemark()) ? item.getRemark().trim() : null);
             record.setInspector(StringUtils.hasText(item.getInspector()) ? item.getInspector().trim() : null);
+            // 巡检时间只在完成填报时写入，是该柜「已巡」的唯一时间依据
             record.setInspectTime(LocalDateTime.now());
             recordRepository.save(record);
 

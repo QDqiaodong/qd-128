@@ -30,6 +30,12 @@ public class InspectionRecordDTO {
     private String inspector;
     private LocalDateTime inspectTime;
 
+    /**
+     * 柜级巡检状态（服务端权威口径）：任一检查项已填报为 INSPECTED（已巡），否则 UNINSPECTED（未巡）。
+     * 列表筛选与详情标记统一取该字段，避免两边口径不一致。
+     */
+    private String inspectionStatus;
+
     /** 该柜体当前待处理异常数 */
     private Integer pendingIssueCount;
     /** 该柜体异常记录总数（含已解决） */

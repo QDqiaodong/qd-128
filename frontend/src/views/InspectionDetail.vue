@@ -5,7 +5,8 @@ import {
   inspectionApi,
   TASK_STATUS_NAME_MAP,
   CHECK_RESULT_NAME_MAP,
-  ISSUE_STATUS_NAME_MAP
+  ISSUE_STATUS_NAME_MAP,
+  INSPECTION_STATUS_NAME_MAP
 } from '@/api/inspection'
 import type {
   InspectionTask,
@@ -13,6 +14,7 @@ import type {
   InspectionIssue,
   CheckResultCode,
   IssueStatusCode,
+  InspectionStatus,
   RecordSubmitItem
 } from '@/api/inspection'
 import { ElMessage } from 'element-plus'
@@ -25,6 +27,8 @@ const task = ref<InspectionTask | null>(null)
 const records = ref<InspectionRecord[]>([])
 const issues = ref<InspectionIssue[]>([])
 const issueStatusFilter = ref<IssueStatusCode | ''>('')
+// 柜级巡检状态筛选：'' 全部 / UNINSPECTED 未巡 / INSPECTED 已巡，以后端记录为唯一数据源
+const inspectionStatusFilter = ref<InspectionStatus | ''>('')
 const savingLockerId = ref<number | null>(null)
 
 // 逐台填报的本地草稿，key 为 lockerId
@@ -57,7 +61,8 @@ const fetchTask = async () => {
 
 const fetchRecords = async () => {
   try {
-    const res = await inspectionApi.getTaskRecords(taskId)
+    // 未巡/已巡筛选由后端按检查项是否填报统一判定，保证列表与详情标记同源
+    const res = await inspectionApi.getTaskRecords(taskId, inspectionStatusFilter.value || undefined)
     records.value = res.data
     // 以服务端数据为准初始化/刷新草稿，保证刷新后进度与已填结果一致
     res.data.forEach((r) => {
@@ -88,17 +93,14 @@ const handleIssueFilterChange = () => {
   fetchIssues()
 }
 
+const handleInspectionStatusFilterChange = () => {
+  fetchRecords()
+}
+
 // ---------------- 填报 ----------------
 
-const isRowFilled = (lockerId: number) => {
-  const d = drafts[lockerId]
-  return d && (d.compartmentResult || d.screenResult || d.lockResult)
-}
-
-const hasAbnormal = (lockerId: number) => {
-  const d = drafts[lockerId]
-  return d && Object.values(d).some((v) => v === 'ABNORMAL')
-}
+// 已巡/未巡一律以服务端 inspectionStatus 为准，不使用本地草稿推导，避免两边标记对不上
+const isInspected = (record: InspectionRecord) => record.inspectionStatus === 'INSPECTED'
 
 const saveRecord = async (record: InspectionRecord) => {
   const draft = drafts[record.lockerId]
@@ -342,28 +344,28 @@ const handleBack = () => {
           </template>
         </el-table-column>
 
-        <el-table-column label="异常" width="120">
+        <el-table-column label="巡检状态" width="120">
           <template #default="{ row }">
             <el-badge v-if="row.pendingIssueCount > 0" :value="row.pendingIssueCount" type="danger">
-              <el-tag type="danger" size="small">待处理</el-tag>
+              <el-tag type="danger" size="small">已巡·异常</el-tag>
             </el-badge>
-            <el-tag v-else-if="row.totalIssueCount > 0" type="success" size="small">已处理</el-tag>
-            <el-tag v-else-if="isRowFilled(row.lockerId) && !hasAbnormal(row.lockerId)" type="success" size="small">
-              正常
+            <el-tag v-else-if="row.totalIssueCount > 0" type="success" size="small">
+              已巡（异常已处理）
             </el-tag>
-            <span v-else class="sub-text">未检</span>
+            <el-tag v-else-if="isInspected(row)" type="success" size="small">已巡·正常</el-tag>
+            <el-tag v-else type="info" size="small">未巡</el-tag>
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="110" fixed="right">
+        <el-table-column label="操作" width="120" fixed="right">
           <template #default="{ row }">
             <el-button
               size="small"
-              type="primary"
+              :type="isInspected(row) ? 'primary' : 'success'"
               :disabled="!row.lockerExists"
               :loading="savingLockerId === row.lockerId"
               @click="saveRecord(row)"
-            >保存填报</el-button>
+            >{{ isInspected(row) ? '重新保存' : '完成巡检' }}</el-button>
           </template>
         </el-table-column>
       </el-table>

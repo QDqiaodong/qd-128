@@ -18,6 +18,8 @@ export type InspectionTaskFilter = InspectionTaskStatusCode | 'INCOMPLETE'
 export type CheckResultCode = 'NORMAL' | 'ABNORMAL' | 'NOT_APPLICABLE'
 export type IssueStatusCode = 'PENDING' | 'PROCESSING' | 'RESOLVED'
 export type CheckItemCode = 'compartment' | 'screen' | 'lock'
+/** 柜级巡检状态：已巡 / 未巡，由后端按检查项是否填报统一判定 */
+export type InspectionStatus = 'INSPECTED' | 'UNINSPECTED'
 
 export interface InspectionTask {
   id: number
@@ -83,6 +85,8 @@ export interface InspectionRecord {
   remark: string | null
   inspector: string | null
   inspectTime: string | null
+  /** 柜级巡检状态（后端权威口径）：INSPECTED-已巡 / UNINSPECTED-未巡 */
+  inspectionStatus: InspectionStatus
   pendingIssueCount: number
   totalIssueCount: number
 }
@@ -177,6 +181,12 @@ export const ISSUE_STATUS_NAME_MAP: Record<IssueStatusCode, string> = {
   RESOLVED: '已解决'
 }
 
+/** 柜级巡检状态中文映射 */
+export const INSPECTION_STATUS_NAME_MAP: Record<InspectionStatus, string> = {
+  UNINSPECTED: '未巡',
+  INSPECTED: '已巡'
+}
+
 export const inspectionApi = {
   getScope(buildingId: number, unitId?: number | null) {
     return api.get<InspectionScope>('/inspections/scope', {
@@ -200,8 +210,10 @@ export const inspectionApi = {
     return api.delete(`/inspections/${id}`)
   },
 
-  getTaskRecords(id: number) {
-    return api.get<InspectionRecord[]>(`/inspections/${id}/records`)
+  getTaskRecords(id: number, inspectionStatus?: InspectionStatus | '') {
+    return api.get<InspectionRecord[]>(`/inspections/${id}/records`, {
+      params: { inspectionStatus: inspectionStatus || undefined }
+    })
   },
 
   submitRecords(id: number, items: RecordSubmitItem[]) {

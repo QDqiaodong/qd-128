@@ -54,8 +54,11 @@ public class InspectionController {
     }
 
     @GetMapping("/{id}/records")
-    public ResponseEntity<List<InspectionRecordDTO>> getTaskRecords(@PathVariable Long id) {
-        return ResponseEntity.ok(inspectionService.getTaskRecords(id));
+    public ResponseEntity<List<InspectionRecordDTO>> getTaskRecords(
+            @PathVariable Long id,
+            /** 柜级巡检状态筛选：INSPECTED-已巡 / UNINSPECTED-未巡 */
+            @RequestParam(required = false) String inspectionStatus) {
+        return ResponseEntity.ok(inspectionService.getTaskRecords(id, inspectionStatus));
     }
 
     @PostMapping("/{id}/submit")

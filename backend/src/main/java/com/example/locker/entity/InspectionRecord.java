@@ -48,11 +48,10 @@ public class InspectionRecord {
     @Column(name = "inspector", length = 50)
     private String inspector;
 
+    /**
+     * 巡检完成时间：明细在任务发起时冻结创建，此时尚未巡检，必须为空；
+     * 仅在提交检查结果（至少一个检查项有值）时写入，作为「已巡」的唯一依据。
+     */
     @Column(name = "inspect_time")
     private LocalDateTime inspectTime;
-
-    @PrePersist
-    protected void onCreate() {
-        inspectTime = LocalDateTime.now();
-    }
 }
