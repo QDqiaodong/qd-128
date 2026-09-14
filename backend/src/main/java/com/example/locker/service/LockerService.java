@@ -138,12 +138,7 @@ public class LockerService {
         List<LockerDTO> dtoList = lockerPage.getContent().stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
-        fillClearanceInfo(dtoList);
-        fillKeyBorrowInfo(dtoList);
-        fillMeterReadingInfo(dtoList);
-        fillRepairInfo(dtoList);
-        fillDoorAlarmInfo(dtoList);
-        fillCollectionSuspensionInfo(dtoList);
+        fillLedgerDerivedInfo(dtoList);
         return new PageResponse<>(dtoList, lockerPage.getTotalElements(), page, size);
     }
 
@@ -151,13 +146,22 @@ public class LockerService {
         Locker locker = lockerRepository.findById(id).orElseThrow(() ->
                 new RuntimeException("快递柜不存在: " + id));
         LockerDTO dto = convertToDTO(locker);
-        fillClearanceInfo(java.util.Collections.singletonList(dto));
-        fillKeyBorrowInfo(java.util.Collections.singletonList(dto));
-        fillMeterReadingInfo(java.util.Collections.singletonList(dto));
-        fillRepairInfo(java.util.Collections.singletonList(dto));
-        fillDoorAlarmInfo(java.util.Collections.singletonList(dto));
-        fillCollectionSuspensionInfo(java.util.Collections.singletonList(dto));
+        fillLedgerDerivedInfo(java.util.Collections.singletonList(dto));
         return dto;
+    }
+
+    /**
+     * 滞留中/借用中/本月已抄/维修中/柜门未关/停收中等派生标记统一由
+     * 各业务台账实时推导，柜体列表、柜详情、多条件筛选走同一入口，
+     * 保证刷新后三处标记互相一致。
+     */
+    private void fillLedgerDerivedInfo(List<LockerDTO> dtos) {
+        fillClearanceInfo(dtos);
+        fillKeyBorrowInfo(dtos);
+        fillMeterReadingInfo(dtos);
+        fillRepairInfo(dtos);
+        fillDoorAlarmInfo(dtos);
+        fillCollectionSuspensionInfo(dtos);
     }
 
     /**
@@ -351,6 +355,8 @@ public class LockerService {
 
     /**
      * 多条件筛选（分页）。停用柜体默认不出现，除非显式指定 statuses。
+     * 停收中等派生标记与柜体列表/详情同源，由业务台账实时推导，
+     * 刷新后重新筛选标记保持一致。
      */
     public PageResponse<LockerDTO> filterLockers(FilterRequest request) {
         Pageable pageable = PageRequest.of(request.getPage() - 1, request.getSize(),
@@ -360,6 +366,7 @@ public class LockerService {
         List<LockerDTO> dtoList = lockerPage.getContent().stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
+        fillLedgerDerivedInfo(dtoList);
         return new PageResponse<>(dtoList, lockerPage.getTotalElements(), request.getPage(), request.getSize());
     }
 
