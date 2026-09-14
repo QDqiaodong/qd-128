@@ -45,6 +45,10 @@ public class LockerDTO {
     private Boolean repairing;
     /** 处理中报修条数 */
     private Integer openRepairCount;
+    /** 是否有未处理的柜门未关告警（柜门未关标记，由告警台账实时推导，刷新后保持一致） */
+    private Boolean doorAjar;
+    /** 未处理柜门未关告警条数 */
+    private Integer openDoorAlarmCount;
     private String remark;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

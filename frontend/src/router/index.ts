@@ -13,6 +13,7 @@ import ClearanceList from '@/views/ClearanceList.vue'
 import KeyBorrowList from '@/views/KeyBorrowList.vue'
 import MeterReadingList from '@/views/MeterReadingList.vue'
 import RepairList from '@/views/RepairList.vue'
+import DoorAlarmList from '@/views/DoorAlarmList.vue'
 
 const routes = [
   { path: '/', name: 'Dashboard', component: Dashboard },
@@ -29,7 +30,8 @@ const routes = [
   { path: '/clearances', name: 'ClearanceList', component: ClearanceList },
   { path: '/key-borrows', name: 'KeyBorrowList', component: KeyBorrowList },
   { path: '/meter-readings', name: 'MeterReadingList', component: MeterReadingList },
-  { path: '/repairs', name: 'RepairList', component: RepairList }
+  { path: '/repairs', name: 'RepairList', component: RepairList },
+  { path: '/door-alarms', name: 'DoorAlarmList', component: DoorAlarmList }
 ]
 
 const router = createRouter({

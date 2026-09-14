@@ -42,6 +42,10 @@ export interface LockerDTO {
   repairing?: boolean
   /** 处理中报修条数 */
   openRepairCount?: number
+  /** 是否有未处理的柜门未关告警（柜门未关标记，由告警台账实时推导） */
+  doorAjar?: boolean
+  /** 未处理柜门未关告警条数 */
+  openDoorAlarmCount?: number
   remark: string
   createTime: string
   updateTime: string

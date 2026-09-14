@@ -273,6 +273,32 @@ CREATE TABLE IF NOT EXISTS repair_ticket (
     -- 同一柜同一格口只允许一条处理中报修单，由后端在建单事务内校验拦截
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜格口报修台账表';
 
+-- 柜门未关告警台账：巡柜发现取件后柜门虚掩/未关严时登记（未处理），
+-- 超过约定分钟仍未关严的柜必须能在本台账中查到；
+-- 确认柜门已关严后同一条记录状态变为已关闭，柜体「柜门未关」标记随之恢复。
+-- 柜体列表/详情的未关标记均以本表为唯一数据源实时推导。
+CREATE TABLE IF NOT EXISTS door_alarm_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    alarm_no VARCHAR(40) NOT NULL UNIQUE COMMENT '告警编号',
+    locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    door_open_time DATETIME NOT NULL COMMENT '发现柜门未关时间',
+    threshold_minutes INT NOT NULL DEFAULT 10 COMMENT '约定关严分钟数，超过仍未关严即为超时告警',
+    reporter VARCHAR(50) NOT NULL COMMENT '上报人(巡柜发现人)',
+    status VARCHAR(20) NOT NULL DEFAULT 'OPEN' COMMENT '告警状态: OPEN-未处理, CLOSED-已关闭',
+    close_operator VARCHAR(50) COMMENT '确认关闭人',
+    close_time DATETIME COMMENT '确认关闭时间',
+    close_note VARCHAR(500) COMMENT '关闭说明',
+    remark TEXT COMMENT '备注',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_door_alarm_locker (locker_id),
+    INDEX idx_door_alarm_status (status),
+    UNIQUE KEY uk_door_alarm_open ((CASE WHEN status = 'OPEN' THEN locker_id END)),
+    FOREIGN KEY (locker_id) REFERENCES locker(id)
+    -- 同一柜同时只允许一条未处理告警（函数唯一索引兜底，已关闭记录不占额度），
+    -- 后端在登记事务内同样校验拦截
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜柜门未关告警台账表';
+
 -- ===================== 种子数据（幂等，可重复执行） =====================
 -- 说明：docker-entrypoint-initdb.d 只在空数据卷首次初始化时执行本脚本；
 -- 若数据卷中已有楼栋/单元（旧版本初始化、初始化中断后重启等），
@@ -392,3 +418,16 @@ SELECT 'BX20260825001', l.id, '12', '12号格口锁具卡顿，柜门无法弹�
 FROM locker l
 WHERE l.locker_no = 'KDG-003'
   AND NOT EXISTS (SELECT 1 FROM repair_ticket r WHERE r.ticket_no = 'BX20260825001');
+
+-- 柜门未关告警：按编号幂等补种；KDG-002 未处理且已超约定分钟（列表/详情显示柜门未关、台账超时标记），KDG-004 已确认关闭的历史记录
+INSERT INTO door_alarm_record (alarm_no, locker_id, door_open_time, threshold_minutes, reporter, status, remark)
+SELECT 'MJ20260913001', l.id, '2026-09-13 08:30:00', 10, '物业巡柜-老周', 'OPEN', '早高峰取件后柜门虚掩，巡柜发现上报'
+FROM locker l
+WHERE l.locker_no = 'KDG-002'
+  AND NOT EXISTS (SELECT 1 FROM door_alarm_record d WHERE d.alarm_no = 'MJ20260913001');
+
+INSERT INTO door_alarm_record (alarm_no, locker_id, door_open_time, threshold_minutes, reporter, status, close_operator, close_time, close_note)
+SELECT 'MJ20260905001', l.id, '2026-09-05 19:10:00', 10, '物业巡柜-老周', 'CLOSED', '系统管理员', '2026-09-05 19:26:00', '现场核实柜门已关严，格口无遗留件'
+FROM locker l
+WHERE l.locker_no = 'KDG-004'
+  AND NOT EXISTS (SELECT 1 FROM door_alarm_record d WHERE d.alarm_no = 'MJ20260905001');

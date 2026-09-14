@@ -6,11 +6,13 @@ import { clearanceApi } from '@/api/clearance'
 import { keyBorrowApi, keyHandoverApi } from '@/api/keyBorrow'
 import { meterReadingApi } from '@/api/meterReading'
 import { repairApi } from '@/api/repair'
+import { doorAlarmApi, DEFAULT_THRESHOLD_MINUTES } from '@/api/doorAlarm'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ClearanceOrder } from '@/api/clearance'
 import type { KeyBorrowRecord, KeyHandover } from '@/api/keyBorrow'
 import type { MeterReadingRecord } from '@/api/meterReading'
 import type { RepairTicket, RepairTicketCreateRequest } from '@/api/repair'
+import type { DoorAlarmRecord, DoorAlarmCreateRequest, DoorAlarmCloseRequest } from '@/api/doorAlarm'
 import type {
   LockerDTO,
   AdjustmentRecord,
@@ -33,6 +35,7 @@ const keyBorrowRecords = ref<KeyBorrowRecord[]>([])
 const keyHandovers = ref<KeyHandover[]>([])
 const meterReadings = ref<MeterReadingRecord[]>([])
 const repairTickets = ref<RepairTicket[]>([])
+const doorAlarms = ref<DoorAlarmRecord[]>([])
 const buildingTree = ref<BuildingTreeDTO[]>([])
 const units = ref<UnitDTO[]>([])
 
@@ -129,7 +132,7 @@ onMounted(async () => {
 
 const fetchData = async () => {
   try {
-    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes, meterReadingRes, keyHandoverRes, repairRes] = await Promise.all([
+    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes, meterReadingRes, keyHandoverRes, repairRes, doorAlarmRes] = await Promise.all([
       lockerApi.getLockerById(lockerId.value),
       lockerApi.getAdjustmentRecords(lockerId.value),
       lockerApi.getStatusChangeRecords(lockerId.value),
@@ -138,7 +141,8 @@ const fetchData = async () => {
       keyBorrowApi.getLockerRecords(lockerId.value),
       meterReadingApi.getLockerRecords(lockerId.value),
       keyHandoverApi.getLockerHandovers(lockerId.value),
-      repairApi.getLockerTickets(lockerId.value)
+      repairApi.getLockerTickets(lockerId.value),
+      doorAlarmApi.getLockerAlarms(lockerId.value)
     ])
     locker.value = lockerRes.data
     adjustmentRecords.value = recordsRes.data
@@ -149,6 +153,7 @@ const fetchData = async () => {
     meterReadings.value = meterReadingRes.data
     keyHandovers.value = keyHandoverRes.data
     repairTickets.value = repairRes.data
+    doorAlarms.value = doorAlarmRes.data
   } catch (error) {
     console.error('获取数据失败', error)
   }
@@ -349,6 +354,154 @@ const handleBack = () => {
   router.push('/lockers')
 }
 
+// ---------------- 柜门未关告警 ----------------
+
+/** 未处理告警条数：与柜体列表/详情的柜门未关标记同源，均由告警台账实时推导 */
+const openDoorAlarmCount = computed(
+  () => doorAlarms.value.filter((a) => a.open).length
+)
+
+const doorAlarmDialogVisible = ref(false)
+const doorAlarmSubmitting = ref(false)
+const doorAlarmForm = ref<DoorAlarmCreateRequest>(emptyDoorAlarmForm())
+
+function emptyDoorAlarmForm(): DoorAlarmCreateRequest {
+  return {
+    lockerId: lockerId.value,
+    doorOpenTime: formatLocalDateTime(new Date()),
+    reporter: '',
+    thresholdMinutes: DEFAULT_THRESHOLD_MINUTES,
+    remark: ''
+  }
+}
+
+/** 当前时间按本地时区格式化为 yyyy-MM-ddTHH:mm:ss，供 el-date-picker value-format 使用 */
+function formatLocalDateTime(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return (
+    `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  )
+}
+
+const openDoorAlarmDialog = () => {
+  doorAlarmForm.value = emptyDoorAlarmForm()
+  doorAlarmDialogVisible.value = true
+}
+
+/** 表单已填写内容时，关闭窗口前确认，避免误关丢单 */
+const doorAlarmFormDirty = computed(() => {
+  const f = doorAlarmForm.value
+  return !!(f.reporter.trim() || (f.remark && f.remark.trim()))
+})
+
+/**
+ * 登记内容只保存在本窗口内，未提交前关闭不会写入任何数据；
+ * 已填写内容时关闭需二次确认，关掉窗口不会留下半条告警。
+ */
+const handleDoorAlarmDialogClose = (done: () => void) => {
+  if (!doorAlarmFormDirty.value) {
+    done()
+    return
+  }
+  ElMessageBox.confirm('关闭后本次填写的内容将丢弃，且不会生成告警记录，确认关闭？', '提示', {
+    type: 'warning',
+    confirmButtonText: '丢弃并关闭',
+    cancelButtonText: '继续填写'
+  })
+    .then(() => done())
+    .catch(() => {})
+}
+
+const submitDoorAlarm = async () => {
+  const f = doorAlarmForm.value
+  if (!f.reporter.trim()) {
+    ElMessage.warning('请填写上报人')
+    return
+  }
+  doorAlarmSubmitting.value = true
+  try {
+    await doorAlarmApi.reportAlarm({
+      lockerId: lockerId.value,
+      doorOpenTime: f.doorOpenTime || undefined,
+      reporter: f.reporter.trim(),
+      thresholdMinutes: f.thresholdMinutes || undefined,
+      remark: f.remark?.trim() || undefined
+    })
+    ElMessage.success('柜门未关告警已登记，柜体已标记柜门未关')
+    doorAlarmDialogVisible.value = false
+    doorAlarmForm.value = emptyDoorAlarmForm()
+    await fetchData()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '登记柜门未关告警失败')
+  } finally {
+    doorAlarmSubmitting.value = false
+  }
+}
+
+// ---------------- 确认已关闭 ----------------
+
+const alarmCloseDialogVisible = ref(false)
+const alarmClosing = ref(false)
+const alarmCloseTarget = ref<DoorAlarmRecord | null>(null)
+const alarmCloseForm = ref<DoorAlarmCloseRequest>({ closeOperator: '', closeNote: '' })
+
+const openAlarmCloseDialog = (alarm: DoorAlarmRecord) => {
+  alarmCloseTarget.value = alarm
+  alarmCloseForm.value = { closeOperator: '', closeNote: '' }
+  alarmCloseDialogVisible.value = true
+}
+
+/** 关闭内容只保存在本窗口内，未提交前关闭不会写入任何数据；已填写内容时关闭需二次确认 */
+const alarmCloseFormDirty = computed(
+  () =>
+    !!(
+      (alarmCloseForm.value.closeOperator || '').trim() ||
+      (alarmCloseForm.value.closeNote || '').trim()
+    )
+)
+
+const handleAlarmCloseDialogClose = (done: () => void) => {
+  if (!alarmCloseFormDirty.value) {
+    done()
+    return
+  }
+  ElMessageBox.confirm('关闭后本次填写的内容将丢弃，告警仍为未处理，确认关闭？', '提示', {
+    type: 'warning',
+    confirmButtonText: '丢弃并关闭',
+    cancelButtonText: '继续填写'
+  })
+    .then(() => done())
+    .catch(() => {})
+}
+
+const submitAlarmClose = async () => {
+  if (!alarmCloseTarget.value) return
+  alarmClosing.value = true
+  try {
+    await doorAlarmApi.closeAlarm(alarmCloseTarget.value.id, {
+      closeOperator: alarmCloseForm.value.closeOperator?.trim() || undefined,
+      closeNote: alarmCloseForm.value.closeNote?.trim() || undefined
+    })
+    ElMessage.success('已确认柜门关严，柜体未关标记恢复')
+    alarmCloseDialogVisible.value = false
+    await fetchData()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '确认关闭失败')
+  } finally {
+    alarmClosing.value = false
+  }
+}
+
+/** 持续时长展示：不足 1 小时显示分钟，否则显示小时+分钟 */
+const formatElapsed = (minutes?: number | null) => {
+  if (minutes === null || minutes === undefined) return '-'
+  if (minutes < 60) return `${minutes} 分钟`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest > 0 ? `${hours} 小时 ${rest} 分` : `${hours} 小时`
+}
+
 const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
 
 /**
@@ -392,6 +545,9 @@ const currentMonthReading = computed(() =>
         </el-descriptions-item>
         <el-descriptions-item label="当前状态">
           <el-tag :type="statusTagType(locker.status)">{{ statusLabel(locker.status) }}</el-tag>
+          <el-tag v-if="locker.doorAjar" type="danger" style="margin-left: 8px">
+            柜门未关（{{ locker.openDoorAlarmCount }} 条）
+          </el-tag>
           <el-tag v-if="locker.overdue" type="danger" style="margin-left: 8px">
             滞留中（{{ locker.overduePackageCount }} 件）
           </el-tag>
@@ -429,6 +585,7 @@ const currentMonthReading = computed(() =>
       <div class="action-bar">
         <el-button type="primary" @click="showAdjustDialog = true">调整归属</el-button>
         <el-button type="danger" plain @click="openRepairDialog">登记报修</el-button>
+        <el-button type="warning" plain @click="openDoorAlarmDialog">登记柜门未关</el-button>
         <template v-if="locker.status === 'ACTIVE'">
           <el-button type="warning" @click="openStatusDialog('TEMPORARILY_DISABLED')">临时停用</el-button>
           <el-button type="danger" @click="openStatusDialog('PERMANENTLY_DISABLED')">永久停用</el-button>
@@ -704,6 +861,71 @@ const currentMonthReading = computed(() =>
     </el-card>
 
     <el-card style="margin-top: 20px;">
+      <template #header>
+        <div class="card-header">
+          <span>柜门未关告警记录</span>
+          <div class="card-header-tags">
+            <el-tag v-if="openDoorAlarmCount > 0" type="danger" size="small">
+              未处理 {{ openDoorAlarmCount }} 条
+            </el-tag>
+            <el-tag v-else type="success" size="small">柜门正常</el-tag>
+            <el-button type="warning" plain size="small" @click="openDoorAlarmDialog">
+              登记柜门未关
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <el-table :data="doorAlarms" border v-if="doorAlarms.length > 0">
+        <el-table-column prop="alarmNo" label="告警编号" width="190" />
+        <el-table-column label="发现未关时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.doorOpenTime) }}</template>
+        </el-table-column>
+        <el-table-column label="约定分钟" width="90" align="center">
+          <template #default="{ row }">{{ row.thresholdMinutes }} 分钟</template>
+        </el-table-column>
+        <el-table-column label="已持续" width="110">
+          <template #default="{ row }">{{ formatElapsed(row.elapsedMinutes) }}</template>
+        </el-table-column>
+        <el-table-column prop="reporter" label="上报人" width="110" show-overflow-tooltip />
+        <el-table-column label="状态" width="120">
+          <template #default="{ row }">
+            <el-tag v-if="row.open" type="danger">未处理</el-tag>
+            <el-tag v-else type="success">已关闭</el-tag>
+            <el-tag v-if="row.overtime" type="danger" effect="dark" style="margin-left: 4px">
+              已超时
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="确认关闭" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.closeTime"
+              :content="`确认关闭时间：${formatTime(row.closeTime)}`"
+              placement="top"
+            >
+              <span>
+                {{ row.closeOperator || '-' }}
+                <template v-if="row.closeNote">（{{ row.closeNote }}）</template>
+              </span>
+            </el-tooltip>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.open"
+              size="small"
+              type="warning"
+              @click="openAlarmCloseDialog(row)"
+            >确认已关闭</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-else class="empty-tip">暂无柜门未关告警记录</div>
+    </el-card>
+
+    <el-card style="margin-top: 20px;">
       <template #header>归属调整历史</template>
       <el-table :data="adjustmentRecords" border v-if="adjustmentRecords.length > 0">
         <el-table-column prop="id" label="记录ID" width="80" />
@@ -904,6 +1126,98 @@ const currentMonthReading = computed(() =>
       <template #footer>
         <el-button @click="handleCompleteDialogClose(() => (completeDialogVisible = false))">取消</el-button>
         <el-button type="warning" :loading="completing" @click="submitComplete">确认完工</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 登记柜门未关弹窗：未提交前关闭仅丢弃草稿，不会留下半条告警 -->
+    <el-dialog
+      title="登记柜门未关"
+      v-model="doorAlarmDialogVisible"
+      width="520px"
+      :close-on-click-modal="false"
+      :before-close="handleDoorAlarmDialogClose"
+    >
+      <el-alert type="warning" :closable="false" class="dialog-tip">
+        上报人必填；提交后柜体标记「柜门未关」，超过约定分钟仍未关严将在告警台账标记超时；
+        同一柜已有未处理告警时不能重复登记。
+      </el-alert>
+      <el-form :model="doorAlarmForm" label-width="110px">
+        <el-form-item label="柜体">
+          <el-tag type="info">{{ locker?.lockerNo }}</el-tag>
+          <span class="repair-locker-meta">{{ locker?.buildingName }} {{ locker?.unitName }}</span>
+        </el-form-item>
+        <el-form-item label="发现未关时间" required>
+          <el-date-picker
+            v-model="doorAlarmForm.doorOpenTime"
+            type="datetime"
+            placeholder="默认当前时间，补登可选过去时间"
+            style="width: 100%"
+            value-format="YYYY-MM-DD[T]HH:mm:ss"
+            :disabled-date="(d: Date) => d.getTime() > Date.now()"
+          />
+        </el-form-item>
+        <el-form-item label="上报人" required>
+          <el-input v-model="doorAlarmForm.reporter" placeholder="必填，如：物业巡柜-老周" />
+        </el-form-item>
+        <el-form-item label="约定关严分钟">
+          <el-input-number
+            v-model="doorAlarmForm.thresholdMinutes"
+            :min="1"
+            :max="1440"
+            style="width: 160px"
+          />
+          <span class="repair-locker-meta">超过该时长仍未关严即标记超时，默认 10 分钟</span>
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="doorAlarmForm.remark"
+            type="textarea"
+            :rows="2"
+            placeholder="选填，如：早高峰取件后柜门虚掩"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="handleDoorAlarmDialogClose(() => (doorAlarmDialogVisible = false))">取消</el-button>
+        <el-button type="primary" :loading="doorAlarmSubmitting" @click="submitDoorAlarm">提交登记</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 确认柜门已关闭弹窗 -->
+    <el-dialog
+      title="确认柜门已关闭"
+      v-model="alarmCloseDialogVisible"
+      width="520px"
+      :close-on-click-modal="false"
+      :before-close="handleAlarmCloseDialogClose"
+    >
+      <template v-if="alarmCloseTarget">
+        <el-alert type="warning" :closable="false" class="dialog-tip">
+          确认后该告警状态变为「已关闭」，柜体「柜门未关」标记恢复；台账中仍是同一条记录，按已关闭可查到。
+        </el-alert>
+        <el-descriptions :column="2" border class="dialog-tip">
+          <el-descriptions-item label="告警编号">{{ alarmCloseTarget.alarmNo }}</el-descriptions-item>
+          <el-descriptions-item label="发现未关时间">{{ formatTime(alarmCloseTarget.doorOpenTime) }}</el-descriptions-item>
+          <el-descriptions-item label="约定分钟">{{ alarmCloseTarget.thresholdMinutes }} 分钟</el-descriptions-item>
+          <el-descriptions-item label="上报人">{{ alarmCloseTarget.reporter }}</el-descriptions-item>
+        </el-descriptions>
+        <el-form label-width="90px">
+          <el-form-item label="确认关闭人">
+            <el-input v-model="alarmCloseForm.closeOperator" placeholder="选填，默认系统管理员" />
+          </el-form-item>
+          <el-form-item label="关闭说明">
+            <el-input
+              v-model="alarmCloseForm.closeNote"
+              type="textarea"
+              :rows="3"
+              placeholder="选填，如：现场核实柜门已关严，格口无遗留件"
+            />
+          </el-form-item>
+        </el-form>
+      </template>
+      <template #footer>
+        <el-button @click="handleAlarmCloseDialogClose(() => (alarmCloseDialogVisible = false))">取消</el-button>
+        <el-button type="warning" :loading="alarmClosing" @click="submitAlarmClose">确认已关闭</el-button>
       </template>
     </el-dialog>
   </div>

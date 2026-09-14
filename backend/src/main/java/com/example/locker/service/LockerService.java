@@ -3,12 +3,14 @@ package com.example.locker.service;
 import com.example.locker.dto.*;
 import com.example.locker.entity.AdjustmentRecord;
 import com.example.locker.entity.ClearanceOrder;
+import com.example.locker.entity.DoorAlarmRecord;
 import com.example.locker.entity.KeyBorrowRecord;
 import com.example.locker.entity.Locker;
 import com.example.locker.entity.MeterReadingRecord;
 import com.example.locker.entity.RepairTicket;
 import com.example.locker.entity.StatusChangeRecord;
 import com.example.locker.enums.ClearanceStatus;
+import com.example.locker.enums.DoorAlarmStatus;
 import com.example.locker.enums.KeyBorrowStatus;
 import com.example.locker.enums.LockerStatus;
 import com.example.locker.enums.MeterReadingStatus;
@@ -16,6 +18,7 @@ import com.example.locker.enums.RepairStatus;
 import com.example.locker.repository.AdjustmentRecordRepository;
 import com.example.locker.repository.BuildingRepository;
 import com.example.locker.repository.ClearanceOrderRepository;
+import com.example.locker.repository.DoorAlarmRecordRepository;
 import com.example.locker.repository.KeyBorrowRecordRepository;
 import com.example.locker.repository.LockerRepository;
 import com.example.locker.repository.MeterReadingRecordRepository;
@@ -74,6 +77,9 @@ public class LockerService {
     private RepairTicketRepository repairTicketRepository;
 
     @Autowired
+    private DoorAlarmRecordRepository doorAlarmRecordRepository;
+
+    @Autowired
     private SpecTemplateService specTemplateService;
 
     public LockerDTO convertToDTO(Locker locker) {
@@ -130,6 +136,7 @@ public class LockerService {
         fillKeyBorrowInfo(dtoList);
         fillMeterReadingInfo(dtoList);
         fillRepairInfo(dtoList);
+        fillDoorAlarmInfo(dtoList);
         return new PageResponse<>(dtoList, lockerPage.getTotalElements(), page, size);
     }
 
@@ -141,6 +148,7 @@ public class LockerService {
         fillKeyBorrowInfo(java.util.Collections.singletonList(dto));
         fillMeterReadingInfo(java.util.Collections.singletonList(dto));
         fillRepairInfo(java.util.Collections.singletonList(dto));
+        fillDoorAlarmInfo(java.util.Collections.singletonList(dto));
         return dto;
     }
 
@@ -224,6 +232,27 @@ public class LockerService {
                     java.util.Collections.emptyList());
             dto.setRepairing(!open.isEmpty());
             dto.setOpenRepairCount(open.size());
+        }
+    }
+
+    /**
+     * 柜门未关标记与未处理告警条数实时由未处理的告警台账推导，
+     * 告警台账是唯一数据源，保证确认关闭刷新后柜体列表/详情的未关标记
+     * 与告警台账状态保持一致。
+     */
+    private void fillDoorAlarmInfo(List<LockerDTO> dtos) {
+        if (dtos == null || dtos.isEmpty()) {
+            return;
+        }
+        List<Long> lockerIds = dtos.stream().map(LockerDTO::getId).collect(Collectors.toList());
+        Map<Long, List<DoorAlarmRecord>> openByLocker = doorAlarmRecordRepository
+                .findByLockerIdInAndStatus(lockerIds, DoorAlarmStatus.OPEN).stream()
+                .collect(Collectors.groupingBy(DoorAlarmRecord::getLockerId));
+        for (LockerDTO dto : dtos) {
+            List<DoorAlarmRecord> open = openByLocker.getOrDefault(dto.getId(),
+                    java.util.Collections.emptyList());
+            dto.setDoorAjar(!open.isEmpty());
+            dto.setOpenDoorAlarmCount(open.size());
         }
     }
 
