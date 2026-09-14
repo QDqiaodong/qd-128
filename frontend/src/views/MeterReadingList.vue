@@ -402,7 +402,8 @@ onMounted(() => {
           本月已抄 <b>{{ readCount }}</b> 台 / 共 <b>{{ overview.length }}</b> 台；
         </template>
         <template v-else>本月已抄台数统计中…；</template>
-        已抄/未抄与柜体页读数实时同源，刷新后保持一致。
+        每行带出本账期前最近一次抄表的读数、抄表人和抄表日期（从未抄过显示「尚未抄过」），
+        与已抄/未抄、柜体页读数实时同源，刷新后保持一致。
       </el-alert>
       <div class="list-header">
         <div class="search-box">
@@ -447,11 +448,23 @@ onMounted(() => {
         <el-table-column label="本月读数" width="110" align="right">
           <template #default="{ row }">{{ formatReading(row.readingValue) }}</template>
         </el-table-column>
-        <el-table-column label="抄表人" width="100">
+        <el-table-column label="本月抄表人" width="100">
           <template #default="{ row }">{{ row.reader || '-' }}</template>
         </el-table-column>
-        <el-table-column label="抄表时间" width="160">
+        <el-table-column label="本月抄表时间" width="160">
           <template #default="{ row }">{{ formatTime(row.readingTime) }}</template>
+        </el-table-column>
+        <el-table-column label="上次读数" width="110" align="right">
+          <template #default="{ row }">
+            <span v-if="row.lastReadingTime">{{ formatReading(row.lastReadingValue) }}</span>
+            <span v-else class="never-read">尚未抄过</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="上次抄表人" width="100">
+          <template #default="{ row }">{{ row.lastReader || '-' }}</template>
+        </el-table-column>
+        <el-table-column label="上次抄表日期" width="160">
+          <template #default="{ row }">{{ formatTime(row.lastReadingTime) }}</template>
         </el-table-column>
         <el-table-column label="操作" width="130" fixed="right">
           <template #default="{ row }">
@@ -487,6 +500,7 @@ onMounted(() => {
       <el-alert type="warning" :closable="false" class="dialog-tip">
         账期（自然月）由抄表时间自动推导；同一柜同一自然月只能存在一张有效抄表单，
         本月已抄的柜体不可重复登记，如需更正请先作废原单。
+        登记读数必须大于该柜上次读数，否则无法保存，请现场核对电表后再提交。
       </el-alert>
       <el-form :model="createForm" label-width="90px">
         <el-form-item label="柜体" required>
@@ -676,6 +690,11 @@ onMounted(() => {
 
 .read-btn-wrap {
   display: inline-block;
+}
+
+.never-read {
+  color: #909399;
+  font-size: 13px;
 }
 
 .empty-tip {

@@ -57,6 +57,12 @@ export interface LockerMeterReadingOverview {
   readingValue: number | null
   reader: string | null
   readingTime: string | null
+  /** 上次电表读数（kWh）：本账期之前最近一次有效抄表，从未抄过为空 */
+  lastReadingValue: number | null
+  /** 上次抄表人，从未抄过为空 */
+  lastReader: string | null
+  /** 上次抄表时间，从未抄过为空（界面显示「尚未抄过」） */
+  lastReadingTime: string | null
 }
 
 export interface MeterReadingLockerOption {

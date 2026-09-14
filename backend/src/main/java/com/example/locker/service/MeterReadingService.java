@@ -53,6 +53,7 @@ public class MeterReadingService {
      * 全部校验通过后才保存，校验不通过则整体回滚，不会写出半张抄表单。
      * 账期（自然月）由抄表时间推导；同一柜同一自然月只允许一张未作废的有效单，
      * 该月已存在有效单时直接拦截（已作废的单不占用额度，作废后可重新登记）。
+     * 电表读数只增不减：登记读数必须大于该柜本账期之前最近一次有效抄表的读数，否则拦截。
      */
     @Transactional
     public MeterReadingRecordDTO createRecord(MeterReadingCreateRequest request) {
@@ -83,6 +84,20 @@ public class MeterReadingService {
                 locker.getId(), periodMonth, MeterReadingStatus.ACTIVE)) {
             throw new IllegalArgumentException("该柜 " + periodMonth + " 已存在有效抄表单，同一柜同一自然月不能挂两张未作废单；如需更正请先作废原单");
         }
+
+        // 电表读数只增不减：本次登记读数必须大于该柜本账期之前最近一次有效抄表的读数，
+        // 从未抄过的柜体没有上次读数，不做该限制
+        meterReadingRecordRepository
+                .findFirstByLockerIdAndPeriodMonthLessThanAndStatusOrderByPeriodMonthDescIdDesc(
+                        locker.getId(), periodMonth, MeterReadingStatus.ACTIVE)
+                .ifPresent(last -> {
+                    if (request.getReadingValue().compareTo(last.getReadingValue()) <= 0) {
+                        throw new IllegalArgumentException("登记读数必须大于上次读数 "
+                                + last.getReadingValue().stripTrailingZeros().toPlainString()
+                                + " kWh（" + last.getPeriodMonth() + " 账期，抄表人：" + last.getReader()
+                                + "），请核对电表后再登记");
+                    }
+                });
 
         MeterReadingRecord record = new MeterReadingRecord();
         record.setRecordNo(generateRecordNo());
@@ -186,6 +201,8 @@ public class MeterReadingService {
      * 按柜本月抄表状态一览：全部柜体（含停用柜）列出，未抄的排前面。
      * 已抄/未抄标记与本月读数实时由有效抄表单推导，抄表单是唯一数据源，
      * 保证刷新后一览、本月已抄台数与柜体页读数保持一致。
+     * 每行（无论已抄未抄）同时带出本账期之前最近一次有效抄表的读数、抄表人和抄表时间，
+     * 同样实时由抄表单推导，刷新总览后再筛未抄上次读数依然在；从未抄过的柜体三项均为空。
      */
     public List<LockerMeterReadingOverviewDTO> getLockerOverview(String periodMonth) {
         String period = StringUtils.hasText(periodMonth) ? periodMonth.trim() : currentPeriod();
@@ -199,12 +216,19 @@ public class MeterReadingService {
                 .findByLockerIdInAndPeriodMonthAndStatus(lockerIds, period, MeterReadingStatus.ACTIVE)
                 .stream().collect(Collectors.toMap(MeterReadingRecord::getLockerId, r -> r, (a, b) -> a));
 
+        // 各柜本账期之前最近的一张有效抄表单（同一柜同一账期只有一张有效单，按账期取最大即可）
+        Map<Long, MeterReadingRecord> lastByLocker = meterReadingRecordRepository
+                .findByLockerIdInAndPeriodMonthLessThanAndStatus(lockerIds, period, MeterReadingStatus.ACTIVE)
+                .stream().collect(Collectors.toMap(MeterReadingRecord::getLockerId, r -> r,
+                        (a, b) -> a.getPeriodMonth().compareTo(b.getPeriodMonth()) >= 0 ? a : b));
+
         Map<Long, String> buildingNames = loadBuildingNames(lockers);
         Map<Long, String> unitNames = loadUnitNames(lockers);
 
         List<LockerMeterReadingOverviewDTO> result = new ArrayList<>();
         for (Locker locker : lockers) {
             MeterReadingRecord active = activeByLocker.get(locker.getId());
+            MeterReadingRecord last = lastByLocker.get(locker.getId());
 
             LockerMeterReadingOverviewDTO dto = new LockerMeterReadingOverviewDTO();
             dto.setLockerId(locker.getId());
@@ -222,6 +246,11 @@ public class MeterReadingService {
                 dto.setReadingValue(active.getReadingValue());
                 dto.setReader(active.getReader());
                 dto.setReadingTime(active.getReadingTime());
+            }
+            if (last != null) {
+                dto.setLastReadingValue(last.getReadingValue());
+                dto.setLastReader(last.getReader());
+                dto.setLastReadingTime(last.getReadingTime());
             }
             result.add(dto);
         }
