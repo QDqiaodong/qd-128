@@ -1,5 +1,6 @@
 package com.example.locker.service;
 
+import com.example.locker.LockerManagementApplication;
 import com.example.locker.dto.CollectionSuspensionCreateRequest;
 import com.example.locker.dto.CollectionSuspensionRecordDTO;
 import com.example.locker.dto.CollectionSuspensionResumeRequest;
@@ -21,9 +22,11 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.domain.Sort;
 
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.TimeZone;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -134,6 +137,42 @@ class CollectionSuspensionServiceTest {
         request.setExpectedResumeTime(LocalDateTime.now().plusHours(9));
         assertThrows(IllegalArgumentException.class, () -> collectionSuspensionService.register(request));
         verify(collectionSuspensionRecordRepository, never()).save(any(CollectionSuspensionRecord.class));
+    }
+
+    @Test
+    void registerAcceptsBrowserNowWhenContainerDefaultsToUtc() {
+        // 回归：容器（eclipse-temurin）JVM 默认 UTC，页面按北京时间生成「当前时刻」提交，
+        // 未统一时区时会被「开始停收时间不能晚于当前时间」误判拦截，台账留不下记录。
+        // 应用启动统一为北京时间后，页面当前时刻 + 次日清晨恢复时间 + 值班人应能登记成功。
+        TimeZone original = TimeZone.getDefault();
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("UTC"));
+            LockerManagementApplication.initBusinessTimeZone();
+
+            LocalDateTime pageNow = LocalDateTime.now(ZoneId.of(LockerManagementApplication.BUSINESS_ZONE_ID));
+            LocalDateTime expectedResume = pageNow.toLocalDate().plusDays(1).atTime(7, 0);
+
+            when(lockerRepository.findById(1L)).thenReturn(Optional.of(locker));
+            when(collectionSuspensionRecordRepository.existsByLockerIdAndStatus(
+                    1L, CollectionSuspensionStatus.SUSPENDED)).thenReturn(false);
+            when(collectionSuspensionRecordRepository.existsByRecordNo(anyString())).thenReturn(false);
+            when(collectionSuspensionRecordRepository.save(any(CollectionSuspensionRecord.class)))
+                    .thenAnswer(invocation -> invocation.getArgument(0));
+
+            CollectionSuspensionCreateRequest request = new CollectionSuspensionCreateRequest();
+            request.setLockerId(1L);
+            request.setSuspendStartTime(pageNow);
+            request.setExpectedResumeTime(expectedResume);
+            request.setDutyOfficer("夜班-陈师傅");
+
+            CollectionSuspensionRecordDTO dto = collectionSuspensionService.register(request);
+
+            assertEquals(CollectionSuspensionStatus.SUSPENDED, dto.getStatus());
+            assertTrue(dto.getSuspended(), "用页面默认时间登记后应为停收中");
+            verify(collectionSuspensionRecordRepository, times(1)).save(any(CollectionSuspensionRecord.class));
+        } finally {
+            TimeZone.setDefault(original);
+        }
     }
 
     @Test
