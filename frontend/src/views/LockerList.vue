@@ -187,6 +187,7 @@ const confirmStatusChange = async () => {
         <template #default="{ row }">
           <el-tag :type="statusTagType(row.status)">{{ statusLabel(row.status) }}</el-tag>
           <el-tag v-if="row.doorAjar" type="danger" style="margin-left: 4px">柜门未关</el-tag>
+          <el-tag v-if="row.collectionSuspended" type="warning" style="margin-left: 4px">停收中</el-tag>
           <el-tag v-if="row.overdue" type="danger" style="margin-left: 4px">滞留中</el-tag>
           <el-tag v-if="row.keyBorrowed" type="warning" style="margin-left: 4px">借用中</el-tag>
           <el-tag v-if="row.repairing" type="danger" style="margin-left: 4px">维修中</el-tag>

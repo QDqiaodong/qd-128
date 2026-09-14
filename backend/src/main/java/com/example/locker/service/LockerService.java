@@ -3,6 +3,7 @@ package com.example.locker.service;
 import com.example.locker.dto.*;
 import com.example.locker.entity.AdjustmentRecord;
 import com.example.locker.entity.ClearanceOrder;
+import com.example.locker.entity.CollectionSuspensionRecord;
 import com.example.locker.entity.DoorAlarmRecord;
 import com.example.locker.entity.KeyBorrowRecord;
 import com.example.locker.entity.Locker;
@@ -10,6 +11,7 @@ import com.example.locker.entity.MeterReadingRecord;
 import com.example.locker.entity.RepairTicket;
 import com.example.locker.entity.StatusChangeRecord;
 import com.example.locker.enums.ClearanceStatus;
+import com.example.locker.enums.CollectionSuspensionStatus;
 import com.example.locker.enums.DoorAlarmStatus;
 import com.example.locker.enums.KeyBorrowStatus;
 import com.example.locker.enums.LockerStatus;
@@ -18,6 +20,7 @@ import com.example.locker.enums.RepairStatus;
 import com.example.locker.repository.AdjustmentRecordRepository;
 import com.example.locker.repository.BuildingRepository;
 import com.example.locker.repository.ClearanceOrderRepository;
+import com.example.locker.repository.CollectionSuspensionRecordRepository;
 import com.example.locker.repository.DoorAlarmRecordRepository;
 import com.example.locker.repository.KeyBorrowRecordRepository;
 import com.example.locker.repository.LockerRepository;
@@ -80,6 +83,9 @@ public class LockerService {
     private DoorAlarmRecordRepository doorAlarmRecordRepository;
 
     @Autowired
+    private CollectionSuspensionRecordRepository collectionSuspensionRecordRepository;
+
+    @Autowired
     private SpecTemplateService specTemplateService;
 
     public LockerDTO convertToDTO(Locker locker) {
@@ -137,6 +143,7 @@ public class LockerService {
         fillMeterReadingInfo(dtoList);
         fillRepairInfo(dtoList);
         fillDoorAlarmInfo(dtoList);
+        fillCollectionSuspensionInfo(dtoList);
         return new PageResponse<>(dtoList, lockerPage.getTotalElements(), page, size);
     }
 
@@ -149,6 +156,7 @@ public class LockerService {
         fillMeterReadingInfo(java.util.Collections.singletonList(dto));
         fillRepairInfo(java.util.Collections.singletonList(dto));
         fillDoorAlarmInfo(java.util.Collections.singletonList(dto));
+        fillCollectionSuspensionInfo(java.util.Collections.singletonList(dto));
         return dto;
     }
 
@@ -253,6 +261,27 @@ public class LockerService {
                     java.util.Collections.emptyList());
             dto.setDoorAjar(!open.isEmpty());
             dto.setOpenDoorAlarmCount(open.size());
+        }
+    }
+
+    /**
+     * 停收中标记与停收中记录条数实时由停收中的停收台账推导，
+     * 停收台账是唯一数据源，保证确认恢复刷新后柜体列表/详情的停收标记
+     * 与停收台账状态保持一致。
+     */
+    private void fillCollectionSuspensionInfo(List<LockerDTO> dtos) {
+        if (dtos == null || dtos.isEmpty()) {
+            return;
+        }
+        List<Long> lockerIds = dtos.stream().map(LockerDTO::getId).collect(Collectors.toList());
+        Map<Long, List<CollectionSuspensionRecord>> openByLocker = collectionSuspensionRecordRepository
+                .findByLockerIdInAndStatus(lockerIds, CollectionSuspensionStatus.SUSPENDED).stream()
+                .collect(Collectors.groupingBy(CollectionSuspensionRecord::getLockerId));
+        for (LockerDTO dto : dtos) {
+            List<CollectionSuspensionRecord> open = openByLocker.getOrDefault(dto.getId(),
+                    java.util.Collections.emptyList());
+            dto.setCollectionSuspended(!open.isEmpty());
+            dto.setOpenCollectionSuspensionCount(open.size());
         }
     }
 

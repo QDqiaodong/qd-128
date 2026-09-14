@@ -49,6 +49,10 @@ public class LockerDTO {
     private Boolean doorAjar;
     /** 未处理柜门未关告警条数 */
     private Integer openDoorAlarmCount;
+    /** 是否有停收中的夜间停收转投记录（停收中标记，由停收台账实时推导，刷新后保持一致） */
+    private Boolean collectionSuspended;
+    /** 停收中记录条数 */
+    private Integer openCollectionSuspensionCount;
     private String remark;
     private LocalDateTime createTime;
     private LocalDateTime updateTime;

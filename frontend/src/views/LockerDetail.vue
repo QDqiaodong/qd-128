@@ -7,12 +7,18 @@ import { keyBorrowApi, keyHandoverApi } from '@/api/keyBorrow'
 import { meterReadingApi } from '@/api/meterReading'
 import { repairApi } from '@/api/repair'
 import { doorAlarmApi, DEFAULT_THRESHOLD_MINUTES } from '@/api/doorAlarm'
+import { collectionSuspensionApi } from '@/api/collectionSuspension'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import type { ClearanceOrder } from '@/api/clearance'
 import type { KeyBorrowRecord, KeyHandover } from '@/api/keyBorrow'
 import type { MeterReadingRecord } from '@/api/meterReading'
 import type { RepairTicket, RepairTicketCreateRequest } from '@/api/repair'
 import type { DoorAlarmRecord, DoorAlarmCreateRequest, DoorAlarmCloseRequest } from '@/api/doorAlarm'
+import type {
+  CollectionSuspensionRecord,
+  CollectionSuspensionCreateRequest,
+  CollectionSuspensionResumeRequest
+} from '@/api/collectionSuspension'
 import type {
   LockerDTO,
   AdjustmentRecord,
@@ -36,6 +42,7 @@ const keyHandovers = ref<KeyHandover[]>([])
 const meterReadings = ref<MeterReadingRecord[]>([])
 const repairTickets = ref<RepairTicket[]>([])
 const doorAlarms = ref<DoorAlarmRecord[]>([])
+const collectionSuspensions = ref<CollectionSuspensionRecord[]>([])
 const buildingTree = ref<BuildingTreeDTO[]>([])
 const units = ref<UnitDTO[]>([])
 
@@ -132,7 +139,7 @@ onMounted(async () => {
 
 const fetchData = async () => {
   try {
-    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes, meterReadingRes, keyHandoverRes, repairRes, doorAlarmRes] = await Promise.all([
+    const [lockerRes, recordsRes, statusRes, treeRes, clearanceRes, keyBorrowRes, meterReadingRes, keyHandoverRes, repairRes, doorAlarmRes, suspensionRes] = await Promise.all([
       lockerApi.getLockerById(lockerId.value),
       lockerApi.getAdjustmentRecords(lockerId.value),
       lockerApi.getStatusChangeRecords(lockerId.value),
@@ -142,7 +149,8 @@ const fetchData = async () => {
       meterReadingApi.getLockerRecords(lockerId.value),
       keyHandoverApi.getLockerHandovers(lockerId.value),
       repairApi.getLockerTickets(lockerId.value),
-      doorAlarmApi.getLockerAlarms(lockerId.value)
+      doorAlarmApi.getLockerAlarms(lockerId.value),
+      collectionSuspensionApi.getLockerRecords(lockerId.value)
     ])
     locker.value = lockerRes.data
     adjustmentRecords.value = recordsRes.data
@@ -154,6 +162,7 @@ const fetchData = async () => {
     keyHandovers.value = keyHandoverRes.data
     repairTickets.value = repairRes.data
     doorAlarms.value = doorAlarmRes.data
+    collectionSuspensions.value = suspensionRes.data
   } catch (error) {
     console.error('获取数据失败', error)
   }
@@ -504,6 +513,156 @@ const formatElapsed = (minutes?: number | null) => {
 
 const formatTime = (t?: string | null) => (t ? t.replace('T', ' ') : '-')
 
+// ---------------- 夜间停收转投 ----------------
+
+/** 停收中记录条数：与柜体列表/详情的停收中标记同源，均由停收台账实时推导 */
+const openSuspensionCount = computed(
+  () => collectionSuspensions.value.filter((r) => r.suspended).length
+)
+
+const suspensionDialogVisible = ref(false)
+const suspensionSubmitting = ref(false)
+const suspensionForm = ref<CollectionSuspensionCreateRequest>(emptySuspensionForm())
+
+function defaultExpectedResumeTime(): string {
+  // 默认预计恢复时间：开始停收时间次日 07:00（夜间停收常见口径）
+  const d = new Date()
+  d.setDate(d.getDate() + 1)
+  d.setHours(7, 0, 0, 0)
+  return formatLocalDateTime(d)
+}
+
+function emptySuspensionForm(): CollectionSuspensionCreateRequest {
+  return {
+    lockerId: lockerId.value,
+    suspendStartTime: formatLocalDateTime(new Date()),
+    expectedResumeTime: defaultExpectedResumeTime(),
+    dutyOfficer: '',
+    remark: ''
+  }
+}
+
+const openSuspensionDialog = () => {
+  suspensionForm.value = emptySuspensionForm()
+  suspensionDialogVisible.value = true
+}
+
+/** 表单已填写内容时，关闭窗口前确认，避免误关丢单 */
+const suspensionFormDirty = computed(() => {
+  const f = suspensionForm.value
+  return !!(f.dutyOfficer.trim() || (f.remark && f.remark.trim()))
+})
+
+/**
+ * 登记内容只保存在本窗口内，未提交前关闭不会写入任何数据；
+ * 已填写内容时关闭需二次确认，关掉窗口不会留下半条停收记录。
+ */
+const handleSuspensionDialogClose = (done: () => void) => {
+  if (!suspensionFormDirty.value) {
+    done()
+    return
+  }
+  ElMessageBox.confirm('关闭后本次填写的内容将丢弃，且不会生成停收记录，确认关闭？', '提示', {
+    type: 'warning',
+    confirmButtonText: '丢弃并关闭',
+    cancelButtonText: '继续填写'
+  })
+    .then(() => done())
+    .catch(() => {})
+}
+
+const submitSuspension = async () => {
+  const f = suspensionForm.value
+  if (!f.suspendStartTime) {
+    ElMessage.warning('请选择开始停收时间')
+    return
+  }
+  if (!f.expectedResumeTime) {
+    ElMessage.warning('请选择预计恢复时间')
+    return
+  }
+  if (f.expectedResumeTime <= f.suspendStartTime) {
+    ElMessage.warning('预计恢复时间必须晚于开始停收时间')
+    return
+  }
+  if (!f.dutyOfficer.trim()) {
+    ElMessage.warning('请填写值班人')
+    return
+  }
+  suspensionSubmitting.value = true
+  try {
+    await collectionSuspensionApi.register({
+      lockerId: lockerId.value,
+      suspendStartTime: f.suspendStartTime || undefined,
+      expectedResumeTime: f.expectedResumeTime,
+      dutyOfficer: f.dutyOfficer.trim(),
+      remark: f.remark?.trim() || undefined
+    })
+    ElMessage.success('夜间停收转投已登记，柜体已标记停收中')
+    suspensionDialogVisible.value = false
+    suspensionForm.value = emptySuspensionForm()
+    await fetchData()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '登记夜间停收转投失败')
+  } finally {
+    suspensionSubmitting.value = false
+  }
+}
+
+// ---------------- 确认已恢复 ----------------
+
+const resumeDialogVisible = ref(false)
+const resuming = ref(false)
+const resumeTarget = ref<CollectionSuspensionRecord | null>(null)
+const resumeForm = ref<CollectionSuspensionResumeRequest>({ resumeOperator: '', resumeNote: '' })
+
+const openResumeDialog = (record: CollectionSuspensionRecord) => {
+  resumeTarget.value = record
+  resumeForm.value = { resumeOperator: '', resumeNote: '' }
+  resumeDialogVisible.value = true
+}
+
+/** 恢复内容只保存在本窗口内，未提交前关闭不会写入任何数据；已填写内容时关闭需二次确认 */
+const resumeFormDirty = computed(
+  () =>
+    !!(
+      (resumeForm.value.resumeOperator || '').trim() ||
+      (resumeForm.value.resumeNote || '').trim()
+    )
+)
+
+const handleResumeDialogClose = (done: () => void) => {
+  if (!resumeFormDirty.value) {
+    done()
+    return
+  }
+  ElMessageBox.confirm('关闭后本次填写的内容将丢弃，该柜仍为停收中，确认关闭？', '提示', {
+    type: 'warning',
+    confirmButtonText: '丢弃并关闭',
+    cancelButtonText: '继续填写'
+  })
+    .then(() => done())
+    .catch(() => {})
+}
+
+const submitResume = async () => {
+  if (!resumeTarget.value) return
+  resuming.value = true
+  try {
+    await collectionSuspensionApi.resume(resumeTarget.value.id, {
+      resumeOperator: resumeForm.value.resumeOperator?.trim() || undefined,
+      resumeNote: resumeForm.value.resumeNote?.trim() || undefined
+    })
+    ElMessage.success('已确认恢复，柜体停收中标记恢复')
+    resumeDialogVisible.value = false
+    await fetchData()
+  } catch (error: any) {
+    ElMessage.error(error.response?.data?.message || '确认恢复失败')
+  } finally {
+    resuming.value = false
+  }
+}
+
 /**
  * 本月有效抄表单（柜体页读数）：与抄表单列表、本月已抄台数同源，
  * 均由有效抄表单实时推导，刷新后保持一致
@@ -548,6 +707,9 @@ const currentMonthReading = computed(() =>
           <el-tag v-if="locker.doorAjar" type="danger" style="margin-left: 8px">
             柜门未关（{{ locker.openDoorAlarmCount }} 条）
           </el-tag>
+          <el-tag v-if="locker.collectionSuspended" type="warning" style="margin-left: 8px">
+            停收中（{{ locker.openCollectionSuspensionCount }} 条）
+          </el-tag>
           <el-tag v-if="locker.overdue" type="danger" style="margin-left: 8px">
             滞留中（{{ locker.overduePackageCount }} 件）
           </el-tag>
@@ -586,6 +748,7 @@ const currentMonthReading = computed(() =>
         <el-button type="primary" @click="showAdjustDialog = true">调整归属</el-button>
         <el-button type="danger" plain @click="openRepairDialog">登记报修</el-button>
         <el-button type="warning" plain @click="openDoorAlarmDialog">登记柜门未关</el-button>
+        <el-button type="warning" plain @click="openSuspensionDialog">登记停收转投</el-button>
         <template v-if="locker.status === 'ACTIVE'">
           <el-button type="warning" @click="openStatusDialog('TEMPORARILY_DISABLED')">临时停用</el-button>
           <el-button type="danger" @click="openStatusDialog('PERMANENTLY_DISABLED')">永久停用</el-button>
@@ -926,6 +1089,71 @@ const currentMonthReading = computed(() =>
     </el-card>
 
     <el-card style="margin-top: 20px;">
+      <template #header>
+        <div class="card-header">
+          <span>夜间停收转投记录</span>
+          <div class="card-header-tags">
+            <el-tag v-if="openSuspensionCount > 0" type="warning" size="small">
+              停收中 {{ openSuspensionCount }} 条
+            </el-tag>
+            <el-tag v-else type="success" size="small">收件正常</el-tag>
+            <el-button type="warning" plain size="small" @click="openSuspensionDialog">
+              登记停收转投
+            </el-button>
+          </div>
+        </div>
+      </template>
+      <el-table :data="collectionSuspensions" border v-if="collectionSuspensions.length > 0">
+        <el-table-column prop="recordNo" label="台账编号" width="190" />
+        <el-table-column label="开始停收时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.suspendStartTime) }}</template>
+        </el-table-column>
+        <el-table-column label="预计恢复时间" width="160">
+          <template #default="{ row }">{{ formatTime(row.expectedResumeTime) }}</template>
+        </el-table-column>
+        <el-table-column label="已持续" width="110">
+          <template #default="{ row }">{{ formatElapsed(row.elapsedMinutes) }}</template>
+        </el-table-column>
+        <el-table-column prop="dutyOfficer" label="值班人" width="110" show-overflow-tooltip />
+        <el-table-column label="状态" width="140">
+          <template #default="{ row }">
+            <el-tag v-if="row.suspended" type="warning">停收中</el-tag>
+            <el-tag v-else type="success">已恢复</el-tag>
+            <el-tag v-if="row.overdue" type="danger" effect="dark" style="margin-left: 4px">
+              逾时未恢复
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="确认恢复" min-width="170" show-overflow-tooltip>
+          <template #default="{ row }">
+            <el-tooltip
+              v-if="row.resumeTime"
+              :content="`确认恢复时间：${formatTime(row.resumeTime)}`"
+              placement="top"
+            >
+              <span>
+                {{ row.resumeOperator || '-' }}
+                <template v-if="row.resumeNote">（{{ row.resumeNote }}）</template>
+              </span>
+            </el-tooltip>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120" fixed="right">
+          <template #default="{ row }">
+            <el-button
+              v-if="row.suspended"
+              size="small"
+              type="warning"
+              @click="openResumeDialog(row)"
+            >确认已恢复</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div v-else class="empty-tip">暂无夜间停收转投记录</div>
+    </el-card>
+
+    <el-card style="margin-top: 20px;">
       <template #header>归属调整历史</template>
       <el-table :data="adjustmentRecords" border v-if="adjustmentRecords.length > 0">
         <el-table-column prop="id" label="记录ID" width="80" />
@@ -1218,6 +1446,98 @@ const currentMonthReading = computed(() =>
       <template #footer>
         <el-button @click="handleAlarmCloseDialogClose(() => (alarmCloseDialogVisible = false))">取消</el-button>
         <el-button type="warning" :loading="alarmClosing" @click="submitAlarmClose">确认已关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 登记夜间停收转投弹窗：未提交前关闭仅丢弃草稿，不会留下半条停收记录 -->
+    <el-dialog
+      title="登记夜间停收转投"
+      v-model="suspensionDialogVisible"
+      width="520px"
+      :close-on-click-modal="false"
+      :before-close="handleSuspensionDialogClose"
+    >
+      <el-alert type="warning" :closable="false" class="dialog-tip">
+        开始停收时间、预计恢复时间、值班人必填；提交后柜体标记「停收中」，正在停收的柜会出现在停收台账；
+        同一柜已有停收中记录时不能重复登记。
+      </el-alert>
+      <el-form :model="suspensionForm" label-width="110px">
+        <el-form-item label="柜体">
+          <el-tag type="info">{{ locker?.lockerNo }}</el-tag>
+          <span class="repair-locker-meta">{{ locker?.buildingName }} {{ locker?.unitName }}</span>
+        </el-form-item>
+        <el-form-item label="开始停收时间" required>
+          <el-date-picker
+            v-model="suspensionForm.suspendStartTime"
+            type="datetime"
+            placeholder="默认当前时间，补登可选过去时间"
+            style="width: 100%"
+            value-format="YYYY-MM-DD[T]HH:mm:ss"
+            :disabled-date="(d: Date) => d.getTime() > Date.now()"
+          />
+        </el-form-item>
+        <el-form-item label="预计恢复时间" required>
+          <el-date-picker
+            v-model="suspensionForm.expectedResumeTime"
+            type="datetime"
+            placeholder="必填，如次日 07:00"
+            style="width: 100%"
+            value-format="YYYY-MM-DD[T]HH:mm:ss"
+          />
+        </el-form-item>
+        <el-form-item label="值班人" required>
+          <el-input v-model="suspensionForm.dutyOfficer" placeholder="必填，如：夜班-陈师傅" />
+        </el-form-item>
+        <el-form-item label="备注">
+          <el-input
+            v-model="suspensionForm.remark"
+            type="textarea"
+            :rows="2"
+            placeholder="选填，如转投柜位置、夜间联系方式等"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="handleSuspensionDialogClose(() => (suspensionDialogVisible = false))">取消</el-button>
+        <el-button type="primary" :loading="suspensionSubmitting" @click="submitSuspension">提交登记</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 确认已恢复弹窗 -->
+    <el-dialog
+      title="确认已恢复"
+      v-model="resumeDialogVisible"
+      width="520px"
+      :close-on-click-modal="false"
+      :before-close="handleResumeDialogClose"
+    >
+      <template v-if="resumeTarget">
+        <el-alert type="warning" :closable="false" class="dialog-tip">
+          确认后该记录状态变为「已恢复」，柜体「停收中」标记恢复；台账中仍是同一条记录，按已恢复可查到。
+        </el-alert>
+        <el-descriptions :column="2" border class="dialog-tip">
+          <el-descriptions-item label="台账编号">{{ resumeTarget.recordNo }}</el-descriptions-item>
+          <el-descriptions-item label="开始停收时间">{{ formatTime(resumeTarget.suspendStartTime) }}</el-descriptions-item>
+          <el-descriptions-item label="预计恢复时间">{{ formatTime(resumeTarget.expectedResumeTime) }}</el-descriptions-item>
+          <el-descriptions-item label="值班人">{{ resumeTarget.dutyOfficer }}</el-descriptions-item>
+        </el-descriptions>
+        <el-form label-width="90px">
+          <el-form-item label="确认恢复人">
+            <el-input v-model="resumeForm.resumeOperator" placeholder="选填，默认系统管理员" />
+          </el-form-item>
+          <el-form-item label="恢复说明">
+            <el-input
+              v-model="resumeForm.resumeNote"
+              type="textarea"
+              :rows="3"
+              placeholder="选填，如：告示已撕，恢复正常收件"
+            />
+          </el-form-item>
+        </el-form>
+      </template>
+      <template #footer>
+        <el-button @click="handleResumeDialogClose(() => (resumeDialogVisible = false))">取消</el-button>
+        <el-button type="warning" :loading="resuming" @click="submitResume">确认已恢复</el-button>
       </template>
     </el-dialog>
   </div>

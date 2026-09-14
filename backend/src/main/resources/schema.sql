@@ -299,6 +299,32 @@ CREATE TABLE IF NOT EXISTS door_alarm_record (
     -- 后端在登记事务内同样校验拦截
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜柜门未关告警台账表';
 
+-- 夜间停收转投台账：夜间停收转投时登记（停收中），
+-- 一次登记记下开始停收时间、预计恢复时间和值班人，正在停收的柜必须能在本台账中查到；
+-- 撕告示恢复后同一条记录状态变为已恢复，柜体「停收中」标记随之恢复。
+-- 柜体列表/详情的停收标记均以本表为唯一数据源实时推导。
+CREATE TABLE IF NOT EXISTS collection_suspension_record (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    record_no VARCHAR(40) NOT NULL UNIQUE COMMENT '台账编号',
+    locker_id BIGINT NOT NULL COMMENT '快递柜ID',
+    suspend_start_time DATETIME NOT NULL COMMENT '开始停收时间',
+    expected_resume_time DATETIME NOT NULL COMMENT '预计恢复时间',
+    duty_officer VARCHAR(50) NOT NULL COMMENT '值班人',
+    status VARCHAR(20) NOT NULL DEFAULT 'SUSPENDED' COMMENT '停收状态: SUSPENDED-停收中, RESUMED-已恢复',
+    resume_operator VARCHAR(50) COMMENT '确认恢复人',
+    resume_time DATETIME COMMENT '确认恢复时间',
+    resume_note VARCHAR(500) COMMENT '恢复说明',
+    remark TEXT COMMENT '备注',
+    create_time DATETIME DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_collection_suspension_locker (locker_id),
+    INDEX idx_collection_suspension_status (status),
+    UNIQUE KEY uk_collection_suspension_open ((CASE WHEN status = 'SUSPENDED' THEN locker_id END)),
+    FOREIGN KEY (locker_id) REFERENCES locker(id)
+    -- 同一柜同时只允许一条停收中记录（函数唯一索引兜底，已恢复记录不占额度），
+    -- 后端在登记事务内同样校验拦截
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='快递柜夜间停收转投台账表';
+
 -- ===================== 种子数据（幂等，可重复执行） =====================
 -- 说明：docker-entrypoint-initdb.d 只在空数据卷首次初始化时执行本脚本；
 -- 若数据卷中已有楼栋/单元（旧版本初始化、初始化中断后重启等），
@@ -431,3 +457,16 @@ SELECT 'MJ20260905001', l.id, '2026-09-05 19:10:00', 10, '物业巡柜-老周', 
 FROM locker l
 WHERE l.locker_no = 'KDG-004'
   AND NOT EXISTS (SELECT 1 FROM door_alarm_record d WHERE d.alarm_no = 'MJ20260905001');
+
+-- 夜间停收转投台账：按编号幂等补种；KDG-001 停收中（列表/详情显示停收中），KDG-003 已确认恢复的历史记录
+INSERT INTO collection_suspension_record (record_no, locker_id, suspend_start_time, expected_resume_time, duty_officer, status, remark)
+SELECT 'TS20260913001', l.id, '2026-09-13 22:00:00', '2026-09-14 07:00:00', '夜班-陈师傅', 'SUSPENDED', '夜间系统维护，到件统一转投2号楼1单元柜'
+FROM locker l
+WHERE l.locker_no = 'KDG-001'
+  AND NOT EXISTS (SELECT 1 FROM collection_suspension_record c WHERE c.record_no = 'TS20260913001');
+
+INSERT INTO collection_suspension_record (record_no, locker_id, suspend_start_time, expected_resume_time, duty_officer, status, resume_operator, resume_time, resume_note)
+SELECT 'TS20260906001', l.id, '2026-09-06 22:00:00', '2026-09-07 07:00:00', '夜班-陈师傅', 'RESUMED', '早班-李管家', '2026-09-07 06:55:00', '告示已撕，恢复正常收件'
+FROM locker l
+WHERE l.locker_no = 'KDG-003'
+  AND NOT EXISTS (SELECT 1 FROM collection_suspension_record c WHERE c.record_no = 'TS20260906001');

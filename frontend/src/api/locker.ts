@@ -46,6 +46,10 @@ export interface LockerDTO {
   doorAjar?: boolean
   /** 未处理柜门未关告警条数 */
   openDoorAlarmCount?: number
+  /** 是否有停收中的夜间停收转投记录（停收中标记，由停收台账实时推导） */
+  collectionSuspended?: boolean
+  /** 停收中记录条数 */
+  openCollectionSuspensionCount?: number
   remark: string
   createTime: string
   updateTime: string

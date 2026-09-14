@@ -12,6 +12,7 @@ import {
   Odometer,
   Tools,
   Bell,
+  MoonNight,
   Expand,
   Fold
 } from '@element-plus/icons-vue'
@@ -94,6 +95,10 @@ const handleMenuSelect = (index: string) => {
           <Bell />
           <span>柜门未关告警</span>
         </el-menu-item>
+        <el-menu-item index="/collection-suspensions">
+          <MoonNight />
+          <span>夜间停收转投</span>
+        </el-menu-item>
       </el-menu>>
     </el-aside>
     <el-container class="main-content">
@@ -115,6 +120,7 @@ const handleMenuSelect = (index: string) => {
           <template v-else-if="route.path === '/meter-readings'">电表抄表</template>
           <template v-else-if="route.path === '/repairs'">格口报修台账</template>
           <template v-else-if="route.path === '/door-alarms'">柜门未关告警</template>
+          <template v-else-if="route.path === '/collection-suspensions'">夜间停收转投</template>
         </div>
         <div class="header-actions">
           <button class="collapse-btn" @click="collapsed = !collapsed">

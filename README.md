@@ -313,3 +313,36 @@ Docker Compose 使用固定端口并绑定 `127.0.0.1`；前后端 Dockerfile �
 - `GET  /api/door-alarms/statuses`：告警状态字典
 - 快递柜 DTO 新增 `doorAjar`（柜门未关标记）、`openDoorAlarmCount`（未处理告警条数），由告警台账实时推导
 
+## 夜间停收转投台账模块
+
+「夜间停收转投」页面（`/collection-suspensions`）供物业在夜间停止收件、快递转投时登记并跟进恢复留痕。
+
+### 登记停收
+
+- 在「快递柜详情」页点「登记停收转投」，**一次登记记下开始停收时间、预计恢复时间和值班人**：值班人必填；**开始停收时间**默认当前时间，补登可选过去时间（不能晚于当前时间）；**预计恢复时间**必填且必须晚于开始停收时间（默认次日 07:00）。
+- **同一柜已有停收中记录时不能重复登记**：后端在登记事务内拦截，数据库函数唯一索引兜底（已恢复记录不占额度），确认恢复后才能再登记。
+- 整个登记在单个事务内一次落库，任一校验不通过整体回滚，**关掉登记窗未提交不会写出半条台账**；前端登记窗口未提交前关闭仅丢弃草稿（已填写内容时关闭需二次确认），不产生任何数据。
+
+### 停收台账与逾时
+
+- 停收台账列表支持按**停收中 / 已恢复**状态筛选（默认停收中），并可按台账编号/值班人/柜体编号关键字搜索。
+- **正在停收的柜必须出现在停收台账**：停收中记录实时计算是否已过预计恢复时间，逾时记录带「逾时未恢复」标记，并展示已持续时长。
+- 「按停收状态」一览列出全部柜体（含停用柜），停收中的柜体置顶，逐柜展示停收中条数、逾时标记、预计恢复时间与历史条数，并汇总当前停收中总条数与逾时台数。
+
+### 确认已恢复与一致性
+
+- 撕告示恢复后点「确认已恢复」，可填确认恢复人（留空默认“系统管理员”）和恢复说明；**同一条台账记录**状态由停收中变为已恢复并记录恢复时间，已恢复的记录不能重复恢复。
+- 「快递柜列表」「快递柜详情」均显示「停收中」标记，详情页另设「夜间停收转投记录」卡片留存该柜全部记录历史；确认恢复后标记实时恢复。
+- 停收标记、停收中条数全部以 `collection_suspension_record` 表为唯一数据源实时推导，**点确认已恢复后柜体不再显示停收，刷新页面后柜体列表不再把该柜标成停收，停收台账按停收中或已恢复筛选找到的都是同一条记录**。
+
+相关接口（前缀 `/api/collection-suspensions`）：
+
+- `POST /api/collection-suspensions`：登记夜间停收转投，body 为 `{ lockerId, suspendStartTime?, expectedResumeTime, dutyOfficer, remark? }`，值班人与预计恢复时间必填；同一柜已有停收中记录返回 400
+- `GET  /api/collection-suspensions?page=&size=&status=&lockerId=&keyword=`：分页停收台账，`status=SUSPENDED/RESUMED`
+- `GET  /api/collection-suspensions/{id}`：停收记录详情
+- `POST /api/collection-suspensions/{id}/resume`：确认已恢复，body 为 `{ resumeOperator?, resumeNote? }`，已恢复不能重复操作
+- `GET  /api/collection-suspensions/locker/{lockerId}`：某台柜体的全部停收记录（柜详情记录同源）
+- `GET  /api/collection-suspensions/locker-overview`：按停收状态一览（含停收标记与停收中条数）
+- `GET  /api/collection-suspensions/statuses`：停收状态字典
+- 快递柜 DTO 新增 `collectionSuspended`（停收中标记）、`openCollectionSuspensionCount`（停收中记录条数），由停收台账实时推导
+

@@ -14,6 +14,7 @@ import KeyBorrowList from '@/views/KeyBorrowList.vue'
 import MeterReadingList from '@/views/MeterReadingList.vue'
 import RepairList from '@/views/RepairList.vue'
 import DoorAlarmList from '@/views/DoorAlarmList.vue'
+import CollectionSuspensionList from '@/views/CollectionSuspensionList.vue'
 
 const routes = [
   { path: '/', name: 'Dashboard', component: Dashboard },
@@ -31,7 +32,8 @@ const routes = [
   { path: '/key-borrows', name: 'KeyBorrowList', component: KeyBorrowList },
   { path: '/meter-readings', name: 'MeterReadingList', component: MeterReadingList },
   { path: '/repairs', name: 'RepairList', component: RepairList },
-  { path: '/door-alarms', name: 'DoorAlarmList', component: DoorAlarmList }
+  { path: '/door-alarms', name: 'DoorAlarmList', component: DoorAlarmList },
+  { path: '/collection-suspensions', name: 'CollectionSuspensionList', component: CollectionSuspensionList }
 ]
 
 const router = createRouter({
